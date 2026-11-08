@@ -121,15 +121,17 @@ type app struct {
 	followCancel context.CancelFunc
 
 	// overlays
-	search    textinput.Model
-	searching bool
-	filter    string
-	inverse   bool
-	command   commandMode
-	prompt    prompt
-	confirm   confirm
-	showHelp  bool
-	showAlias bool
+	search     textinput.Model
+	searching  bool
+	filter     string
+	inverse    bool
+	command    commandMode
+	prompt     prompt
+	history    viewHistory
+	confirm    confirm
+	showHelp   bool
+	showAlias  bool
+	showCrumbs bool
 
 	status string
 	err    string
@@ -158,6 +160,7 @@ func NewApp(a *api.API, state *api.SwarmState) *app {
 	app.search.Placeholder = "filter…"
 	app.search.CharLimit = 64
 
+	app.showCrumbs = true
 	app.command = newCommandMode()
 	app.prompt = newPrompt()
 	return app
@@ -339,8 +342,24 @@ func (a *app) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, a.search.Focus()
 	case key.Matches(msg, a.keys.Refresh):
 		return a, a.refreshCmd()
+	case key.Matches(msg, a.keys.ToggleCrumbs):
+		a.showCrumbs = !a.showCrumbs
+		a.resize()
+		return a, nil
 	case key.Matches(msg, a.keys.AliasList):
 		a.showAlias = !a.showAlias
+		return a, nil
+	case key.Matches(msg, a.keys.BackView):
+		return a.goBack()
+	case key.Matches(msg, a.keys.ForwardView):
+		return a.goForward()
+	case key.Matches(msg, a.keys.LastView):
+		return a.goLast()
+	case key.Matches(msg, a.keys.ClearFilter):
+		a.filter = ""
+		a.inverse = false
+		a.search.SetValue("")
+		a.applyFilter()
 		return a, nil
 	}
 
@@ -402,7 +421,16 @@ func (a *app) stopFollow() {
 
 // goTo switches screens and loads the data that screen needs.
 func (a *app) goTo(s screen) (tea.Model, tea.Cmd) {
+	return a.goToScreen(s, true)
+}
+
+// goToScreen switches views, optionally recording the move in the
+// navigation history.
+func (a *app) goToScreen(s screen, record bool) (tea.Model, tea.Cmd) {
 	a.screen = s
+	if record {
+		a.recordView()
+	}
 	a.err = ""
 	a.resize()
 	switch s {
@@ -611,10 +639,16 @@ func (a *app) resize() {
 // screen.
 func (a *app) chromeHeight() int {
 	n := 3 // header + action bar + status bar
+	if a.showCrumbs {
+		n++
+	}
 	if a.screen == screenDetail {
 		n += 3 // detail header
 	}
 	if a.searching || a.filter != "" {
+		n++
+	}
+	if a.command.active {
 		n++
 	}
 	return n
@@ -653,13 +687,13 @@ func (a *app) actionBar() string {
 		if !enabled {
 			style = dimStyle
 		}
-		parts = append(parts, style.Render(act.label))
+		parts = append(parts, style.Render("<"+act.mnemonic()+"> "+act.desc))
 	}
 	parts = append(parts,
-		keyStyle.Render(": cmd"),
-		keyStyle.Render("/ search"),
-		keyStyle.Render("ctrl+r refresh"),
-		keyStyle.Render("? help"),
+		keyStyle.Render("<:> Cmd"),
+		keyStyle.Render("</> Filter"),
+		keyStyle.Render("<ctrl+r> Refresh"),
+		keyStyle.Render("<?> Help"),
 	)
 	return " " + strings.Join(parts, dimStyle.Render(" · ")) + "\n"
 }
@@ -670,10 +704,16 @@ func (a *app) View() string {
 	}
 	var b strings.Builder
 	b.WriteString(a.headerLine())
+	if a.showCrumbs {
+		b.WriteString(a.crumbs())
+	}
 	if a.searching || a.filter != "" {
 		b.WriteString(a.searchLine())
 	}
 	b.WriteString(a.bodyView())
+	if a.command.active {
+		b.WriteString(a.promptLine())
+	}
 	b.WriteString(a.actionBar())
 	b.WriteString(a.statusLine())
 
@@ -683,9 +723,6 @@ func (a *app) View() string {
 	}
 	if a.showAlias {
 		view = a.overlayAliases(view)
-	}
-	if a.command.active {
-		view = a.overlayCommand(view)
 	}
 	if a.prompt.active {
 		view = a.overlayPrompt(view)

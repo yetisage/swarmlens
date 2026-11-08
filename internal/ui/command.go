@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -101,15 +102,19 @@ func parseCommand(line string) (command, error) {
 	return c, nil
 }
 
-// commandMode is the ":" prompt. Like k9s it is a command interpreter for
-// navigating between resource views — not a menu of actions.
+// commandMode is the ":" prompt.
+//
+// Like k9s it is a command interpreter for navigating between resource
+// views — not a menu of actions — and it uses k9s' fish-style inline
+// suggestions: the completion is shown as ghost text after the cursor,
+// tab accepts it and the arrow keys cycle through the candidates.
 type commandMode struct {
-	active  bool
-	input   textinput.Model
-	history []string
-	histPos int // -1 = editing a fresh line
-	matches []resourceAlias
-	err     string
+	active      bool
+	input       textinput.Model
+	suggestions []string
+	suggIndex   int
+	history     []string
+	err         string
 }
 
 func newCommandMode() commandMode {
@@ -117,58 +122,103 @@ func newCommandMode() commandMode {
 	in.Prompt = ": "
 	in.Placeholder = "service, node, volume…"
 	in.CharLimit = 64
-	return commandMode{input: in, histPos: -1}
+	return commandMode{input: in, suggIndex: -1}
 }
 
 func (c *commandMode) open() {
 	c.active = true
 	c.err = ""
-	c.histPos = -1
 	c.input.SetValue("")
-	c.updateMatches()
+	c.suggest()
 	c.input.Focus()
 }
 
 func (c *commandMode) close() {
 	c.active = false
 	c.input.Blur()
+	c.suggestions = nil
+	c.suggIndex = -1
 }
 
-// updateMatches recomputes the completion list for the current input.
-func (c *commandMode) updateMatches() {
-	word := strings.Fields(c.input.Value())
-	q := ""
-	if len(word) > 0 {
-		q = word[0]
-	}
-	c.matches = nil
-	for _, a := range aliases {
-		if q == "" {
-			c.matches = append(c.matches, a)
-			continue
+// suggest recomputes the inline suggestions for the current text.
+//
+// Like k9s, an empty prompt offers the command history and a non-empty one
+// offers the alias names that extend it.
+func (c *commandMode) suggest() {
+	text := c.input.Value()
+	c.suggestions = nil
+	c.suggIndex = -1
+
+	if text == "" {
+		// The history, most recent first.
+		for i := len(c.history) - 1; i >= 0 && len(c.suggestions) < 10; i-- {
+			c.suggestions = append(c.suggestions, c.history[i])
 		}
-		for _, n := range a.names() {
-			if strings.HasPrefix(n, strings.ToLower(q)) {
-				c.matches = append(c.matches, a)
+		if len(c.suggestions) > 0 {
+			c.suggIndex = 0
+		}
+		return
+	}
+
+	word := strings.Fields(text)
+	q := strings.ToLower(word[0])
+	for _, al := range aliases {
+		for _, n := range al.names() {
+			if n != q && strings.HasPrefix(n, q) {
+				c.suggestions = append(c.suggestions, strings.TrimPrefix(n, q))
 				break
 			}
 		}
 	}
+	sort.Strings(c.suggestions)
+	if len(c.suggestions) > 0 {
+		c.suggIndex = 0
+	}
 }
 
-// acceptCompletion replaces the typed word with the selected alias.
-func (c *commandMode) acceptCompletion(a resourceAlias) {
-	word := strings.Fields(c.input.Value())
-	if len(word) == 0 {
-		c.input.SetValue(a.kind + " ")
-		c.input.CursorEnd()
-		c.updateMatches()
+// ghost returns the suggestion to show after the cursor.
+func (c *commandMode) ghost() string {
+	if c.suggIndex < 0 || c.suggIndex >= len(c.suggestions) {
+		return ""
+	}
+	return c.suggestions[c.suggIndex]
+}
+
+// acceptSuggestion appends the current suggestion to the text, like k9s'
+// tab completion.
+func (c *commandMode) acceptSuggestion() {
+	g := c.ghost()
+	if g == "" {
 		return
 	}
-	word[0] = a.kind
-	c.input.SetValue(strings.Join(word, " "))
+	c.input.SetValue(c.input.Value() + g)
 	c.input.CursorEnd()
-	c.updateMatches()
+	c.suggest()
+}
+
+// cycleSuggestion moves through the candidates, like k9s' up/down keys.
+func (c *commandMode) cycleSuggestion(delta int) {
+	if len(c.suggestions) == 0 {
+		return
+	}
+	if c.suggIndex < 0 {
+		c.suggIndex = 0
+	} else {
+		c.suggIndex += delta
+	}
+	if c.suggIndex < 0 {
+		c.suggIndex = len(c.suggestions) - 1
+	}
+	if c.suggIndex >= len(c.suggestions) {
+		c.suggIndex = 0
+	}
+}
+
+// clear empties the prompt.
+func (c *commandMode) clear() {
+	c.input.SetValue("")
+	c.input.CursorStart()
+	c.suggest()
 }
 
 // pushHistory records an executed command.
@@ -177,7 +227,6 @@ func (c *commandMode) pushHistory(line string) {
 	if line == "" {
 		return
 	}
-	// Drop a duplicate of the previous entry.
 	if n := len(c.history); n > 0 && c.history[n-1] == line {
 		return
 	}
@@ -185,35 +234,4 @@ func (c *commandMode) pushHistory(line string) {
 	if len(c.history) > 50 {
 		c.history = c.history[len(c.history)-50:]
 	}
-}
-
-// historyPrev walks back through the history.
-func (c *commandMode) historyPrev() {
-	if len(c.history) == 0 {
-		return
-	}
-	if c.histPos == -1 {
-		c.histPos = len(c.history) - 1
-	} else if c.histPos > 0 {
-		c.histPos--
-	}
-	c.input.SetValue(c.history[c.histPos])
-	c.input.CursorEnd()
-	c.updateMatches()
-}
-
-// historyNext walks forward through the history.
-func (c *commandMode) historyNext() {
-	if c.histPos == -1 {
-		return
-	}
-	if c.histPos < len(c.history)-1 {
-		c.histPos++
-		c.input.SetValue(c.history[c.histPos])
-	} else {
-		c.histPos = -1
-		c.input.SetValue("")
-	}
-	c.input.CursorEnd()
-	c.updateMatches()
 }

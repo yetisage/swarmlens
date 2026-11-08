@@ -235,13 +235,13 @@ func TestCommandHistory(t *testing.T) {
 	if len(a.command.history) != 2 {
 		t.Fatalf("history has %d entries, want 2", len(a.command.history))
 	}
-	a.command.historyPrev()
-	if a.command.input.Value() != "node" {
-		t.Errorf("history back = %q, want node", a.command.input.Value())
+	// The history is offered as suggestions when the prompt is empty.
+	a.command.open()
+	if len(a.command.suggestions) != 2 {
+		t.Fatalf("expected the two history entries as suggestions, got %d", len(a.command.suggestions))
 	}
-	a.command.historyNext()
-	if a.command.input.Value() != "" {
-		t.Errorf("history forward = %q, want empty", a.command.input.Value())
+	if a.command.suggestions[0] != "node" {
+		t.Errorf("first suggestion = %q, want node", a.command.suggestions[0])
 	}
 }
 
@@ -300,7 +300,7 @@ func TestActionBarShowsCurrentViewKeys(t *testing.T) {
 	a.selectedServiceID = "id-a"
 
 	bar := a.actionBar()
-	for _, want := range []string{"d describe", "s scale", "u update", "ctrl+d delete"} {
+	for _, want := range []string{"<s>", "<u>", "<ctrl+d>", "<:> Cmd"} {
 		if !strings.Contains(bar, want) {
 			t.Errorf("action bar %q is missing %q", bar, want)
 		}
@@ -308,7 +308,7 @@ func TestActionBarShowsCurrentViewKeys(t *testing.T) {
 
 	a.screen = screenNodes
 	bar = a.actionBar()
-	for _, want := range []string{"D drain", "A activate", "p promote", "w demote"} {
+	for _, want := range []string{"<D>", "<A>", "<p>", "<w>"} {
 		if !strings.Contains(bar, want) {
 			t.Errorf("node action bar %q is missing %q", bar, want)
 		}
@@ -362,26 +362,54 @@ func TestRemoveServiceAsksForConfirmation(t *testing.T) {
 	}
 }
 
-func TestCommandCompletion(t *testing.T) {
+func TestCommandSuggestions(t *testing.T) {
 	a := newTestApp()
 	a.command.open()
 
-	if len(a.command.matches) != len(aliases) {
-		t.Fatalf("an empty command should list every resource, got %d", len(a.command.matches))
+	// An empty prompt offers the history, not the resource list.
+	if len(a.command.suggestions) != 0 {
+		t.Fatalf("a fresh prompt should have no suggestions, got %d", len(a.command.suggestions))
 	}
 
-	// Typing a prefix narrows the list.
+	// Typing a prefix suggests the remainder, k9s-style.
 	a.command.input.SetValue("vol")
-	a.command.updateMatches()
-	if len(a.command.matches) != 1 || a.command.matches[0].screen != screenVolumes {
-		t.Errorf("matches = %v, want the volumes view", a.command.matches)
+	a.command.suggest()
+	if len(a.command.suggestions) != 1 || a.command.suggestions[0] != "ume" {
+		t.Fatalf("suggestions = %v, want [ume]", a.command.suggestions)
+	}
+	if a.command.ghost() != "ume" {
+		t.Errorf("ghost = %q, want ume", a.command.ghost())
 	}
 
-	// A word that matches nothing yields no completions.
+	// Tab accepts the suggestion.
+	a.command.acceptSuggestion()
+	if a.command.input.Value() != "volume" {
+		t.Errorf("after tab: %q, want volume", a.command.input.Value())
+	}
+
+	// A word that matches nothing yields no suggestions.
 	a.command.input.SetValue("zzzznotacommand")
-	a.command.updateMatches()
-	if len(a.command.matches) != 0 {
-		t.Errorf("expected no matches, got %d", len(a.command.matches))
+	a.command.suggest()
+	if len(a.command.suggestions) != 0 {
+		t.Errorf("expected no suggestions, got %d", len(a.command.suggestions))
+	}
+}
+
+func TestViewHistoryNavigation(t *testing.T) {
+	a := newTestApp()
+	a.goTo(screenServices)
+	a.goTo(screenNodes)
+	a.goTo(screenVolumes)
+
+	if _, _ = a.goBack(); a.screen != screenNodes {
+		t.Errorf("after back: screen = %v, want nodes", a.screen)
+	}
+	if _, _ = a.goForward(); a.screen != screenVolumes {
+		t.Errorf("after forward: screen = %v, want volumes", a.screen)
+	}
+	// "-" returns to the newest entry in the history, like k9s' Top().
+	if _, _ = a.goLast(); a.screen != screenVolumes {
+		t.Errorf("after last view: screen = %v, want volumes", a.screen)
 	}
 }
 

@@ -55,12 +55,14 @@ carry a filter; every action lives on a key instead:
 :service /!web keep everything that does NOT match
 ```
 
-The prompt completes on `tab`, keeps a history you can walk with `↑`/`↓`,
-and `ctrl+a` shows the full alias table.
+The prompt uses k9s' fish-style **inline suggestions**: typing `:vol` shows
+`ume` as ghost text, `tab` (or `→`/`ctrl+f`) accepts it and `↑`/`↓` cycle
+through the candidates. An empty prompt offers the command history.
+`ctrl+w`/`ctrl+u` clear it, `enter` or `ctrl+e` runs it.
 
 **Context-sensitive actions** — the same key does different things depending
-on the resource view, and the footer shows the keys that apply right now
-(k9s' "active keyboard mnemonics"):
+on the resource view. The bottom bar shows the keys that apply right now,
+in k9s' `<key> Description` format (k9s' "active keyboard mnemonics"):
 
 | View | Keys |
 |---|---|
@@ -70,13 +72,19 @@ on the resource view, and the footer shows the keys that apply right now
 | logs | `f` follow |
 | volumes / networks / secrets / configs | `ctrl+d` delete |
 
-The bindings follow k9s' conventions: `ctrl-d` deletes, `ctrl-r` refreshes,
+The bindings follow k9s' conventions: `ctrl-d` deletes, `ctrl+r` refreshes,
 `d` describes, `l` shows logs. Destructive actions open a confirmation
 dialog whose focus starts on **Cancel**, so a stray `enter` cannot delete
 anything (`tab` moves the focus, `y`/`n` also work).
 
+**Chrome** — a breadcrumb trail under the header (`services › demo › task`)
+shows where you are; `ctrl+g` toggles it. `[` goes back, `]` goes forward
+and `-` returns to the newest view, walking the same history k9s keeps in
+its command buffer.
+
 Global: `:` command · `/` filter · `ctrl+r` refresh · `ctrl+a` aliases ·
-`?` help · `esc`/`b` back · `q` quit.
+`ctrl+u` clear filter · `ctrl+g` crumbs · `[` `]` `-` history · `?` help ·
+`esc`/`b` back · `q` quit.
 
 **Robustness** — selection is tracked by **id**, so it survives live
 refreshes that reorder rows; the layout is computed from the terminal size;
@@ -111,6 +119,7 @@ manage a remote swarm; worker nodes fall back to polling.
 /            filter          s        scale         u  update      R  rollback
 ctrl+d       delete          ctrl+r   refresh       ctrl+a aliases
 D / A        drain/activate  p / w    promote/demote
+[ ] -        history         ctrl+u   clear filter  ctrl+g crumbs
 esc/b        back            ?        help          q  quit
 ```
 
@@ -131,7 +140,9 @@ internal/ui/          Bubble Tea program
   keys.go             global keymap + the viewAction type
   viewactions.go      per-view, context-sensitive actions
   command.go          the ":" command interpreter + resource alias table
-  commandview.go      the command prompt overlay and its key handling
+  commandview.go      the command prompt and its key handling
+  crumbs.go           breadcrumb trail + the view history
+  navigate.go         history navigation (back / forward / last)
   aliases.go          the alias table overlay (ctrl+a)
   prompt.go           value prompt (scale) + confirmation dialog
   help.go             the contextual help overlay
