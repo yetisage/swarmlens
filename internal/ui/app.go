@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -95,9 +94,9 @@ type app struct {
 	width, height int
 
 	// tables, one per screen
-	services, nodes, tasks table.Model
-	volumes, networks      table.Model
-	secrets, configs       table.Model
+	services, nodes, tasks dataTable
+	volumes, networks      dataTable
+	secrets, configs       dataTable
 
 	// data backing the tables
 	serviceRows []api.ServiceRow
@@ -142,13 +141,13 @@ func NewApp(a *api.API, state *api.SwarmState) *app {
 		keys:   defaultGlobalKeys(),
 		screen: screenServices,
 	}
-	app.services = newNavTable(serviceColumns()...)
-	app.nodes = newNavTable(nodeColumns()...)
-	app.tasks = newNavTable(taskColumns()...)
-	app.volumes = newNavTable(volumeColumns()...)
-	app.networks = newNavTable(networkColumns()...)
-	app.secrets = newNavTable(secretColumns()...)
-	app.configs = newNavTable(configColumns()...)
+	app.services = newDataTable(serviceColumns()...)
+	app.nodes = newDataTable(nodeColumns()...)
+	app.tasks = newDataTable(taskColumns()...)
+	app.volumes = newDataTable(volumeColumns()...)
+	app.networks = newDataTable(networkColumns()...)
+	app.secrets = newDataTable(secretColumns()...)
+	app.configs = newDataTable(configColumns()...)
 	app.logs = viewport.New(80, 20)
 
 	app.search = textinput.New()
@@ -586,7 +585,7 @@ func (a *app) applyTasks(rows []api.TaskRow) {
 
 // restoreCursor keeps the selection stable across refreshes by re-finding
 // the previously selected id in the new row set.
-func restoreCursor[T any](tbl *table.Model, rows []T, id func(T) string, selected string, sel *string) {
+func restoreCursor[T any](tbl *dataTable, rows []T, id func(T) string, selected string, sel *string) {
 	if len(rows) == 0 {
 		tbl.SetCursor(0)
 		return
@@ -619,7 +618,7 @@ func (a *app) resize() {
 	if th < 3 {
 		th = 3
 	}
-	for _, t := range []*table.Model{&a.services, &a.nodes, &a.tasks, &a.volumes, &a.networks, &a.secrets, &a.configs} {
+	for _, t := range []*dataTable{&a.services, &a.nodes, &a.tasks, &a.volumes, &a.networks, &a.secrets, &a.configs} {
 		t.SetWidth(tw)
 		t.SetHeight(th)
 	}

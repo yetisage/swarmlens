@@ -95,6 +95,7 @@ internal/ui/          Bubble Tea program
   app.go              root model, screens, layout, key dispatch
   keys.go             keymap + help text
   styles.go           adaptive light/dark theme, state colours
+  table.go            ANSI-aware table renderer (see note below)
   views.go            table columns and coloured row builders
   commands.go         async loaders, follow, action runner
   actions.go          action handlers (scale, update, drain, …)
@@ -138,6 +139,25 @@ sending keystrokes) to verify the interactive views.
 - Container logs for tasks are multiplexed (no TTY) and need the 8-byte
   std-stream header stripped before display.
 - The swarm API normalizes image references on decode (`nginx` → `nginx:latest`).
+
+## Why swarmlens has its own table renderer
+
+`bubbles/table` truncates cell values **byte-wise**. When a cell contains
+ANSI colour codes, the escape sequence eats into the column budget and gets
+cut in half:
+
+- a date in a 26-wide column rendered as `2025-06…` instead of `2025-06-01`,
+  because the 19-byte escape sequence counted against the 26 bytes;
+- in narrower columns the escape itself was truncated, producing an invalid
+  sequence that left the terminal's colour state set. Plain cells carry no
+  escape of their own, so they **inherited** that colour from the previous
+  row — which is why some rows rendered dim while the first row and the row
+  below the cursor rendered in the default colour.
+
+`internal/ui/table.go` truncates and pads with ANSI-aware operations
+(`x/ansi`), so escape sequences survive intact, every cell ends with a reset,
+and nothing leaks between rows. The selected row is marked with a background
+colour. `table_test.go` locks this behaviour in.
 
 ## Roadmap
 

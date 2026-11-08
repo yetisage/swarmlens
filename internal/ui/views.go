@@ -4,227 +4,199 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/key"
-	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/lipgloss"
 
 	"swarmlens/internal/api"
 )
 
-// navKeyMap keeps only arrow/page navigation, leaving single-letter keys
-// (d, l, b, s, n, …) free for view navigation and actions.
-func navKeyMap() table.KeyMap {
-	return table.KeyMap{
-		LineUp:       key.NewBinding(key.WithKeys("up"), key.WithHelp("↑", "up")),
-		LineDown:     key.NewBinding(key.WithKeys("down"), key.WithHelp("↓", "down")),
-		PageUp:       key.NewBinding(key.WithKeys("pgup"), key.WithHelp("pgup", "page up")),
-		PageDown:     key.NewBinding(key.WithKeys("pgdown"), key.WithHelp("pgdn", "page down")),
-		HalfPageUp:   key.NewBinding(key.WithKeys("ctrl+u"), key.WithHelp("ctrl+u", "½ up")),
-		HalfPageDown: key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "½ down")),
-		GotoTop:      key.NewBinding(key.WithKeys("home"), key.WithHelp("home", "start")),
-		GotoBottom:   key.NewBinding(key.WithKeys("end"), key.WithHelp("end", "end")),
+var (
+	headerStyle = lipgloss.NewStyle().Bold(true)
+	nameStyle   = lipgloss.NewStyle().Bold(false).Foreground(colName)
+	plainStyle  = lipgloss.Style{}
+)
+
+func serviceColumns() []column {
+	return []column{
+		{Title: "NAME", Width: 26, Style: nameStyle},
+		{Title: "IMAGE", Width: 30, Style: dimStyle},
+		{Title: "REPLICAS", Width: 12, Style: plainStyle},
+		{Title: "MODE", Width: 16, Style: dimStyle},
+		{Title: "UPDATED", Width: 26, Style: plainStyle},
 	}
 }
 
-func newNavTable(cols ...table.Column) table.Model {
-	styles := table.DefaultStyles()
-	styles.Header = styles.Header.
-		BorderStyle(lipgloss.NormalBorder()).
-		BorderForeground(colDim).
-		BorderBottom(true).
-		Bold(true)
-	styles.Selected = lipgloss.NewStyle().Bold(true).Foreground(colTitle)
-
-	return table.New(
-		table.WithColumns(cols),
-		table.WithFocused(true),
-		table.WithKeyMap(navKeyMap()),
-		table.WithStyles(styles),
-	)
-}
-
-func serviceColumns() []table.Column {
-	return []table.Column{
-		{Title: "NAME", Width: 26},
-		{Title: "IMAGE", Width: 30},
-		{Title: "REPLICAS", Width: 12},
-		{Title: "MODE", Width: 16},
-		{Title: "UPDATED", Width: 26},
+func nodeColumns() []column {
+	return []column{
+		{Title: "HOSTNAME", Width: 24, Style: nameStyle},
+		{Title: "ROLE", Width: 10, Style: plainStyle},
+		{Title: "AVAILABILITY", Width: 16, Style: plainStyle},
+		{Title: "STATUS", Width: 12, Style: plainStyle},
+		{Title: "ENGINE", Width: 12, Style: dimStyle},
+		{Title: "ADDR", Width: 22, Style: dimStyle},
 	}
 }
 
-func nodeColumns() []table.Column {
-	return []table.Column{
-		{Title: "HOSTNAME", Width: 24},
-		{Title: "ROLE", Width: 10},
-		{Title: "AVAILABILITY", Width: 16},
-		{Title: "STATUS", Width: 12},
-		{Title: "ENGINE", Width: 12},
-		{Title: "ADDR", Width: 22},
+func taskColumns() []column {
+	return []column{
+		{Title: "TASK", Width: 20, Style: nameStyle},
+		{Title: "NODE", Width: 20, Style: dimStyle},
+		{Title: "DESIRED", Width: 10, Style: dimStyle},
+		{Title: "STATE", Width: 12, Style: plainStyle},
+		{Title: "CONTAINER", Width: 14, Style: dimStyle},
+		{Title: "SINCE", Width: 10, Style: dimStyle},
 	}
 }
 
-func taskColumns() []table.Column {
-	return []table.Column{
-		{Title: "TASK", Width: 20},
-		{Title: "NODE", Width: 20},
-		{Title: "DESIRED", Width: 10},
-		{Title: "STATE", Width: 12},
-		{Title: "CONTAINER", Width: 14},
-		{Title: "SINCE", Width: 10},
+func volumeColumns() []column {
+	return []column{
+		{Title: "NAME", Width: 40, Style: nameStyle},
+		{Title: "DRIVER", Width: 16, Style: dimStyle},
+		{Title: "SCOPE", Width: 12, Style: dimStyle},
+		{Title: "CREATED", Width: 26, Style: dimStyle},
 	}
 }
 
-func volumeColumns() []table.Column {
-	return []table.Column{
-		{Title: "NAME", Width: 34},
-		{Title: "DRIVER", Width: 16},
-		{Title: "SCOPE", Width: 12},
-		{Title: "CREATED", Width: 26},
+func networkColumns() []column {
+	return []column{
+		{Title: "NAME", Width: 40, Style: nameStyle},
+		{Title: "DRIVER", Width: 16, Style: dimStyle},
+		{Title: "SCOPE", Width: 12, Style: dimStyle},
+		{Title: "INTERNAL", Width: 12, Style: plainStyle},
+		{Title: "LABELS", Width: 10, Style: dimStyle},
 	}
 }
 
-func networkColumns() []table.Column {
-	return []table.Column{
-		{Title: "NAME", Width: 34},
-		{Title: "DRIVER", Width: 16},
-		{Title: "SCOPE", Width: 12},
-		{Title: "INTERNAL", Width: 12},
-		{Title: "LABELS", Width: 10},
+func secretColumns() []column {
+	return []column{
+		{Title: "NAME", Width: 40, Style: nameStyle},
+		{Title: "DRIVER", Width: 16, Style: dimStyle},
+		{Title: "LABELS", Width: 10, Style: dimStyle},
+		{Title: "CREATED", Width: 16, Style: dimStyle},
 	}
 }
 
-func secretColumns() []table.Column {
-	return []table.Column{
-		{Title: "NAME", Width: 40},
-		{Title: "DRIVER", Width: 16},
-		{Title: "LABELS", Width: 10},
-		{Title: "CREATED", Width: 16},
-	}
-}
-
-func configColumns() []table.Column {
-	return []table.Column{
-		{Title: "NAME", Width: 40},
-		{Title: "LABELS", Width: 10},
-		{Title: "CREATED", Width: 16},
+func configColumns() []column {
+	return []column{
+		{Title: "NAME", Width: 40, Style: nameStyle},
+		{Title: "LABELS", Width: 10, Style: dimStyle},
+		{Title: "CREATED", Width: 16, Style: dimStyle},
 	}
 }
 
 // serviceTableRows renders service rows with state colouring.
-func serviceTableRows(rows []api.ServiceRow) []table.Row {
-	out := make([]table.Row, 0, len(rows))
+func serviceTableRows(rows []api.ServiceRow) [][]string {
+	out := make([][]string, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, table.Row{
+		out = append(out, []string{
 			r.Name,
-			dimStyle.Render(r.Image),
+			r.Image,
 			replicaStyle(r.Running, r.Desired, r.Mode).Render(r.Replicas),
-			dimStyle.Render(r.Mode),
-			stateStyle(r.Updated).Render(r.Updated),
+			r.Mode,
+			r.Updated,
 		})
 	}
 	return out
 }
 
-func nodeTableRows(rows []api.NodeRow) []table.Row {
-	out := make([]table.Row, 0, len(rows))
+func nodeTableRows(rows []api.NodeRow) [][]string {
+	out := make([][]string, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, table.Row{
+		out = append(out, []string{
 			r.Hostname,
-			roleStyle(r.Role).Render(r.Role),
-			availabilityStyle(r.Availability).Render(r.Availability),
-			stateStyle(r.Status).Render(r.Status),
-			dimStyle.Render(r.Engine),
-			dimStyle.Render(r.Addr),
+			r.Role,
+			r.Availability,
+			r.Status,
+			r.Engine,
+			r.Addr,
 		})
 	}
 	return out
 }
 
-func taskTableRows(rows []api.TaskRow) []table.Row {
-	out := make([]table.Row, 0, len(rows))
+func taskTableRows(rows []api.TaskRow) [][]string {
+	out := make([][]string, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, table.Row{
+		out = append(out, []string{
 			r.Name,
-			dimStyle.Render(r.Node),
-			dimStyle.Render(r.Desired),
-			stateStyle(r.Current).Render(r.Current),
-			dimStyle.Render(api.ShortID(r.ContainerID)),
-			dimStyle.Render(r.Since),
+			r.Node,
+			r.Desired,
+			r.Current,
+			api.ShortID(r.ContainerID),
+			r.Since,
 		})
 	}
 	return out
 }
 
-func volumeTableRows(rows []api.VolumeRow) []table.Row {
-	out := make([]table.Row, 0, len(rows))
+func volumeTableRows(rows []api.VolumeRow) [][]string {
+	out := make([][]string, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, table.Row{
-			r.Name,
-			dimStyle.Render(r.Driver),
-			dimStyle.Render(r.Scope),
-			dimStyle.Render(r.Created),
-		})
+		out = append(out, []string{r.Name, r.Driver, r.Scope, r.Created})
 	}
 	return out
 }
 
-func networkTableRows(rows []api.NetworkRow) []table.Row {
-	out := make([]table.Row, 0, len(rows))
+func networkTableRows(rows []api.NetworkRow) [][]string {
+	out := make([][]string, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, table.Row{
+		out = append(out, []string{
 			r.Name,
-			dimStyle.Render(r.Driver),
-			dimStyle.Render(r.Scope),
-			dimStyle.Render(fmt.Sprintf("%t", r.Internal)),
-			dimStyle.Render(fmt.Sprintf("%d", r.Labels)),
+			r.Driver,
+			r.Scope,
+			fmt.Sprintf("%t", r.Internal),
+			fmt.Sprintf("%d", r.Labels),
 		})
 	}
 	return out
 }
 
-func secretTableRows(rows []api.SecretRow) []table.Row {
-	out := make([]table.Row, 0, len(rows))
+func secretTableRows(rows []api.SecretRow) [][]string {
+	out := make([][]string, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, table.Row{
-			r.Name,
-			dimStyle.Render(r.Driver),
-			dimStyle.Render(fmt.Sprintf("%d", r.Labels)),
-			dimStyle.Render(r.Created),
-		})
+		out = append(out, []string{r.Name, r.Driver, fmt.Sprintf("%d", r.Labels), r.Created})
 	}
 	return out
 }
 
-func configTableRows(rows []api.ConfigRow) []table.Row {
-	out := make([]table.Row, 0, len(rows))
+func configTableRows(rows []api.ConfigRow) [][]string {
+	out := make([][]string, 0, len(rows))
 	for _, r := range rows {
-		out = append(out, table.Row{
-			r.Name,
-			dimStyle.Render(fmt.Sprintf("%d", r.Labels)),
-			dimStyle.Render(r.Created),
-		})
+		out = append(out, []string{r.Name, fmt.Sprintf("%d", r.Labels), r.Created})
 	}
 	return out
 }
 
-func roleStyle(role string) lipgloss.Style {
-	if role == "manager" {
-		return lipgloss.NewStyle().Foreground(colTitle)
-	}
-	return stateDimStyle
-}
-
-func availabilityStyle(avail string) lipgloss.Style {
-	switch avail {
-	case "active":
+// stateStyle maps a swarm state string to a colour.
+func stateStyle(state string) lipgloss.Style {
+	switch state {
+	case "running", "ready", "active", "completed", "healthy":
 		return stateOKStyle
-	case "drain":
+	case "updating", "starting", "pending", "preparing", "drain", "pause":
 		return stateWarnStyle
-	case "pause":
-		return stateInfoStyle
-	default:
+	case "failed", "down", "rejected", "shutdown", "orphaned", "unhealthy":
+		return stateErrStyle
+	case "":
 		return stateDimStyle
+	default:
+		return stateInfoStyle
+	}
+}
+
+// replicaStyle colours the running/desired column: green when fully
+// converged, yellow while converging, red when degraded.
+func replicaStyle(running, desired int, mode string) lipgloss.Style {
+	if mode == "global" {
+		return stateInfoStyle
+	}
+	switch {
+	case desired == 0:
+		return stateDimStyle
+	case running == desired:
+		return stateOKStyle
+	case running < desired:
+		return stateWarnStyle
+	default:
+		return stateErrStyle
 	}
 }
 

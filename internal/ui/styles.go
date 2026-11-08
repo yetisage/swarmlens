@@ -16,6 +16,10 @@ var (
 	colDimBG   = lipgloss.AdaptiveColor{Light: "#eeeeee", Dark: "#262626"}
 	colSelBG   = lipgloss.AdaptiveColor{Light: "#dddddd", Dark: "#303030"}
 	colOverlay = lipgloss.AdaptiveColor{Light: "#f5f5f5", Dark: "#1c1c1c"}
+	// colName is the emphasised column (resource names). It is explicitly
+	// coloured rather than left at the terminal default, so that every row
+	// renders identically regardless of the terminal theme.
+	colName = lipgloss.AdaptiveColor{Light: "#26262a", Dark: "#f2f2f7"}
 )
 
 var (
@@ -50,35 +54,4 @@ var (
 )
 
 // stateStyle maps a swarm state string to a colour.
-func stateStyle(state string) lipgloss.Style {
-	switch state {
-	case "running", "ready", "active", "completed", "healthy":
-		return stateOKStyle
-	case "updating", "starting", "pending", "preparing", "drain", "pause":
-		return stateWarnStyle
-	case "failed", "down", "rejected", "shutdown", "orphaned", "unhealthy":
-		return stateErrStyle
-	case "":
-		return stateDimStyle
-	default:
-		return stateInfoStyle
-	}
-}
-
-// replicaStyle colours the running/desired column: green when fully
-// converged, yellow while converging, red when degraded.
-func replicaStyle(running, desired int, mode string) lipgloss.Style {
-	if mode == "global" {
-		return stateInfoStyle
-	}
-	switch {
-	case desired == 0:
-		return stateDimStyle
-	case running == desired:
-		return stateOKStyle
-	case running < desired:
-		return stateWarnStyle
-	default:
-		return stateErrStyle
-	}
-}
+// (defined in views.go alongside the column definitions)
