@@ -139,15 +139,18 @@ func TestApplyFilterUpdatesTable(t *testing.T) {
 	}
 }
 
-// TestPaletteSwitchesResourceViews checks that resource types are reached
-// through the command palette, as in k9s, rather than via dedicated keys.
-func TestPaletteSwitchesResourceViews(t *testing.T) {
+// TestCommandSwitchesResourceViews checks that resource types are reached
+// through the ":" command, as in k9s, rather than via dedicated keys.
+func TestCommandSwitchesResourceViews(t *testing.T) {
 	cases := []struct {
-		alias string
-		want  screen
+		word string
+		want screen
 	}{
 		{"svc", screenServices},
-		{"nodes", screenNodes},
+		{"service", screenServices},
+		{"services", screenServices},
+		{"no", screenNodes},
+		{"node", screenNodes},
 		{"vol", screenVolumes},
 		{"net", screenNetworks},
 		{"sec", screenSecrets},
@@ -155,20 +158,90 @@ func TestPaletteSwitchesResourceViews(t *testing.T) {
 	}
 	for _, c := range cases {
 		a := newTestApp()
-		a.palette.open(a.paletteCommands())
+		a.command.open()
 
-		// Type the alias.
-		a.palette.input.SetValue(c.alias)
-		a.palette.applyFilter()
-		if len(a.palette.filtered) == 0 {
-			t.Fatalf("alias %q matched no command", c.alias)
+		// Type the command word.
+		for _, r := range c.word {
+			a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
 		}
-
-		// Enter runs the first match.
 		a.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
 		if a.screen != c.want {
-			t.Errorf("alias %q switched to %v, want %v", c.alias, a.screen, c.want)
+			t.Errorf("command %q switched to %v, want %v", c.word, a.screen, c.want)
 		}
+	}
+}
+
+// TestCommandCarriesFilter checks the k9s-style ":resource /filter"
+// argument.
+func TestCommandCarriesFilter(t *testing.T) {
+	a := newTestApp()
+	a.applyServices([]api.ServiceRow{
+		{ID: "1", Name: "web", Image: "nginx"},
+		{ID: "2", Name: "db", Image: "postgres"},
+	})
+	a.command.open()
+	a.command.input.SetValue("service /web")
+	a.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if a.screen != screenServices {
+		t.Fatalf("screen = %v, want services", a.screen)
+	}
+	if a.filter != "web" {
+		t.Errorf("filter = %q, want web", a.filter)
+	}
+	if len(a.visibleServices()) != 1 {
+		t.Errorf("filtered to %d services, want 1", len(a.visibleServices()))
+	}
+}
+
+// TestCommandDoesNotOfferActions checks that the command mode is for
+// navigation only — no actions live there.
+func TestCommandDoesNotOfferActions(t *testing.T) {
+	if len(aliases) == 0 {
+		t.Fatal("expected a resource alias table")
+	}
+	for _, al := range aliases {
+		for _, n := range al.names() {
+			if strings.Contains(n, "scale") || strings.Contains(n, "delete") {
+				t.Errorf("the command mode must not offer actions, found %q", n)
+			}
+		}
+	}
+}
+
+// TestCommandRejectsUnknownResource checks the error path.
+func TestCommandRejectsUnknownResource(t *testing.T) {
+	a := newTestApp()
+	a.command.open()
+	a.command.input.SetValue("bogus")
+	a.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if a.command.err == "" {
+		t.Error("expected an error for an unknown command")
+	}
+	if a.screen != screenServices {
+		t.Errorf("screen = %v, want to stay on services", a.screen)
+	}
+}
+
+// TestCommandHistory checks the command history, like k9s' command buffer.
+func TestCommandHistory(t *testing.T) {
+	a := newTestApp()
+	for _, word := range []string{"service", "node"} {
+		a.command.open()
+		a.command.input.SetValue(word)
+		a.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+	}
+	if len(a.command.history) != 2 {
+		t.Fatalf("history has %d entries, want 2", len(a.command.history))
+	}
+	a.command.historyPrev()
+	if a.command.input.Value() != "node" {
+		t.Errorf("history back = %q, want node", a.command.input.Value())
+	}
+	a.command.historyNext()
+	if a.command.input.Value() != "" {
+		t.Errorf("history forward = %q, want empty", a.command.input.Value())
 	}
 }
 
@@ -192,8 +265,8 @@ func TestSameKeyMeansDifferentThingsPerView(t *testing.T) {
 	a.services.SetCursor(0)
 	a.selectedServiceID = "id-a"
 
-	// In the services view, "x" asks to remove the service.
-	a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	// In the services view, ctrl-d asks to delete the service.
+	a.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
 	if !a.confirm.active {
 		t.Fatal("expected a confirmation prompt in the services view")
 	}
@@ -202,14 +275,14 @@ func TestSameKeyMeansDifferentThingsPerView(t *testing.T) {
 	}
 	a.confirm.active = false
 
-	// In the nodes view, the same key asks to remove the node.
+	// In the nodes view, the same key asks to delete the node.
 	a.screen = screenNodes
 	a.nodeRows = []api.NodeRow{{ID: "node-1", Hostname: "worker-1", Role: "worker", Availability: "active", Status: "ready"}}
 	a.applyNodes(a.nodeRows)
 	a.nodes.SetCursor(0)
 	a.selectedNodeID = "node-1"
 
-	a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	a.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
 	if !a.confirm.active {
 		t.Fatal("expected a confirmation prompt in the nodes view")
 	}
@@ -227,7 +300,7 @@ func TestActionBarShowsCurrentViewKeys(t *testing.T) {
 	a.selectedServiceID = "id-a"
 
 	bar := a.actionBar()
-	for _, want := range []string{"+ scale", "- scale", "u update", "x remove"} {
+	for _, want := range []string{"d describe", "s scale", "u update", "ctrl+d delete"} {
 		if !strings.Contains(bar, want) {
 			t.Errorf("action bar %q is missing %q", bar, want)
 		}
@@ -277,9 +350,9 @@ func TestRemoveServiceAsksForConfirmation(t *testing.T) {
 	a.services.SetCursor(0)
 	a.selectedServiceID = "id-a"
 
-	a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	a.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
 	if !a.confirm.active {
-		t.Fatal("expected a confirmation prompt before removing")
+		t.Fatal("expected a confirmation prompt before deleting")
 	}
 
 	// Cancelling must close the prompt without acting.
@@ -289,35 +362,26 @@ func TestRemoveServiceAsksForConfirmation(t *testing.T) {
 	}
 }
 
-func TestPaletteFiltersCommands(t *testing.T) {
+func TestCommandCompletion(t *testing.T) {
 	a := newTestApp()
-	a.applyServices([]api.ServiceRow{svc("id-a", "web", 1, 1)})
-	a.services.SetCursor(0)
-	a.selectedServiceID = "id-a"
+	a.command.open()
 
-	a.palette.open(a.paletteCommands())
-
-	if len(a.palette.filtered) == 0 {
-		t.Fatal("palette should start with all commands")
+	if len(a.command.matches) != len(aliases) {
+		t.Fatalf("an empty command should list every resource, got %d", len(a.command.matches))
 	}
 
-	// Service-specific commands only exist when a service is selected.
-	a.palette.input.SetValue("scale")
-	a.palette.applyFilter()
-	if len(a.palette.filtered) == 0 {
-		t.Fatal("filtering by 'scale' should match the scale commands")
-	}
-	for _, it := range a.palette.filtered {
-		if !a.palette.matches(it, "scale") {
-			t.Errorf("filtered item %q does not match the query", it.title)
-		}
+	// Typing a prefix narrows the list.
+	a.command.input.SetValue("vol")
+	a.command.updateMatches()
+	if len(a.command.matches) != 1 || a.command.matches[0].screen != screenVolumes {
+		t.Errorf("matches = %v, want the volumes view", a.command.matches)
 	}
 
-	// A query that matches nothing yields no commands.
-	a.palette.input.SetValue("zzzznotacommand")
-	a.palette.applyFilter()
-	if len(a.palette.filtered) != 0 {
-		t.Errorf("expected no matches, got %d", len(a.palette.filtered))
+	// A word that matches nothing yields no completions.
+	a.command.input.SetValue("zzzznotacommand")
+	a.command.updateMatches()
+	if len(a.command.matches) != 0 {
+		t.Errorf("expected no matches, got %d", len(a.command.matches))
 	}
 }
 

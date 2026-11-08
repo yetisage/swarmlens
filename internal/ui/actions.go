@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,6 +12,9 @@ import (
 )
 
 // scaleService adjusts the replica count of the selected service.
+//
+// Like k9s, scaling opens a prompt for the desired count rather than
+// stepping through values: delta of 0 asks for an absolute count.
 func (a *app) scaleService(delta int) (tea.Model, tea.Cmd) {
 	svc := a.currentService()
 	if svc == nil {
@@ -18,13 +22,26 @@ func (a *app) scaleService(delta int) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	name := svc.Name
-	return a, actionCmd(a, func(ctx context.Context) (string, error) {
-		n, err := a.api.ScaleService(ctx, name, delta)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("scaled %s to %d replicas", name, n), nil
-	})
+	current := strconv.Itoa(svc.Desired)
+
+	a.prompt.ask(
+		fmt.Sprintf("Scale %s", name),
+		current,
+		func(a *app, value string) (tea.Model, tea.Cmd) {
+			n, ok := parseCount(value)
+			if !ok {
+				a.setStatus(fmt.Sprintf("%q is not a valid replica count", value))
+				return a, nil
+			}
+			return a, actionCmd(a, func(ctx context.Context) (string, error) {
+				if err := a.api.SetReplicas(ctx, name, n); err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("scaled %s to %d replicas", name, n), nil
+			})
+		},
+	)
+	return a, nil
 }
 
 // forceUpdateService triggers a rolling update of the selected service.

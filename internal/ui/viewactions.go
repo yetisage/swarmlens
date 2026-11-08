@@ -8,18 +8,17 @@ import (
 // Context-sensitive bindings. The same key means different things in
 // different views, which is how k9s keeps a small, consistent vocabulary.
 var (
-	bindDetail    = key.NewBinding(key.WithKeys("enter", "d"), key.WithHelp("d", "detail"))
-	bindLogs      = key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "logs"))
-	bindScaleUp   = key.NewBinding(key.WithKeys("+", "="), key.WithHelp("+", "scale up"))
-	bindScaleDown = key.NewBinding(key.WithKeys("-"), key.WithHelp("-", "scale down"))
-	bindUpdate    = key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update"))
-	bindRollback  = key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "rollback"))
-	bindRemove    = key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "remove"))
-	bindDrain     = key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "drain"))
-	bindActivate  = key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "activate"))
-	bindPromote   = key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "promote"))
-	bindDemote    = key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "demote"))
-	bindFollow    = key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "follow"))
+	bindDetail   = key.NewBinding(key.WithKeys("enter", "d"), key.WithHelp("d", "detail"))
+	bindLogs     = key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "logs"))
+	bindScale    = key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "scale"))
+	bindUpdate   = key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update"))
+	bindRollback = key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "rollback"))
+	bindRemove   = key.NewBinding(key.WithKeys("ctrl+d"), key.WithHelp("ctrl+d", "delete"))
+	bindDrain    = key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "drain"))
+	bindActivate = key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "activate"))
+	bindPromote  = key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "promote"))
+	bindDemote   = key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "demote"))
+	bindFollow   = key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "follow"))
 )
 
 // viewActions returns the actions available in the current view.
@@ -49,24 +48,17 @@ func (a *app) serviceActions() []viewAction {
 	return []viewAction{
 		{
 			binding: bindDetail,
-			label:   "d detail",
-			desc:    "open the task list",
+			label:   "d describe",
+			desc:    "show the tasks of the service",
 			enabled: func(a *app) bool { return a.currentService() != nil },
 			run:     func(a *app) (tea.Model, tea.Cmd) { return a.openDetail() },
 		},
 		{
-			binding: bindScaleUp,
-			label:   "+ scale",
-			desc:    "add one replica",
+			binding: bindScale,
+			label:   "s scale",
+			desc:    "set the desired replica count",
 			enabled: func(a *app) bool { return a.currentService() != nil && a.currentService().Mode == "replicated" },
-			run:     func(a *app) (tea.Model, tea.Cmd) { return a.scaleService(+1) },
-		},
-		{
-			binding: bindScaleDown,
-			label:   "- scale",
-			desc:    "remove one replica",
-			enabled: func(a *app) bool { return a.currentService() != nil && a.currentService().Mode == "replicated" },
-			run:     func(a *app) (tea.Model, tea.Cmd) { return a.scaleService(-1) },
+			run:     func(a *app) (tea.Model, tea.Cmd) { return a.scaleService(0) },
 		},
 		{
 			binding: bindUpdate,
@@ -84,7 +76,7 @@ func (a *app) serviceActions() []viewAction {
 		},
 		{
 			binding: bindRemove,
-			label:   "x remove",
+			label:   "ctrl+d delete",
 			desc:    "delete the service and its tasks",
 			enabled: func(a *app) bool { return a.currentService() != nil },
 			run:     func(a *app) (tea.Model, tea.Cmd) { return a.removeService() },
@@ -124,7 +116,7 @@ func (a *app) nodeActions() []viewAction {
 		},
 		{
 			binding: bindRemove,
-			label:   "x remove",
+			label:   "ctrl+d delete",
 			desc:    "force-remove the node from the swarm",
 			enabled: func(a *app) bool { return a.currentNode() != nil },
 			run:     func(a *app) (tea.Model, tea.Cmd) { return a.removeNode() },
@@ -136,7 +128,7 @@ func (a *app) volumeActions() []viewAction {
 	return []viewAction{
 		{
 			binding: bindRemove,
-			label:   "x remove",
+			label:   "ctrl+d delete",
 			desc:    "delete the volume",
 			enabled: func(a *app) bool { return a.currentVolume() != nil },
 			run:     func(a *app) (tea.Model, tea.Cmd) { return a.removeVolume() },
@@ -148,7 +140,7 @@ func (a *app) networkActions() []viewAction {
 	return []viewAction{
 		{
 			binding: bindRemove,
-			label:   "x remove",
+			label:   "ctrl+d delete",
 			desc:    "delete the network",
 			enabled: func(a *app) bool { return a.currentNetwork() != nil },
 			run:     func(a *app) (tea.Model, tea.Cmd) { return a.removeNetwork() },
@@ -160,7 +152,7 @@ func (a *app) secretActions() []viewAction {
 	return []viewAction{
 		{
 			binding: bindRemove,
-			label:   "x remove",
+			label:   "ctrl+d delete",
 			desc:    "delete the secret (refused while a service uses it)",
 			enabled: func(a *app) bool { return len(a.secretRows) > 0 },
 			run:     func(a *app) (tea.Model, tea.Cmd) { return a.removeSecret() },
@@ -172,7 +164,7 @@ func (a *app) configActions() []viewAction {
 	return []viewAction{
 		{
 			binding: bindRemove,
-			label:   "x remove",
+			label:   "ctrl+d delete",
 			desc:    "delete the config (refused while a service uses it)",
 			enabled: func(a *app) bool { return len(a.configRows) > 0 },
 			run:     func(a *app) (tea.Model, tea.Cmd) { return a.removeConfig() },

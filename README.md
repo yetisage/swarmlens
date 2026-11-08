@@ -40,24 +40,43 @@ fallback (and the only source on worker nodes).
 | `D` / `A` | drain / activate the selected node |
 | `p` / `w` | promote / demote the selected node |
 
-**Navigation** — like k9s, resource types are reached through the **command
-palette** (`:`, or `:` plus a short alias such as `svc`, `no`, `vol`, `net`,
-`sec`, `cfg`), not through a dedicated key per resource. The letter keys
-stay free for actions whose meaning follows the current view.
+**Navigation** — following k9s, the `:` prompt is a **command interpreter for
+navigation**, not a menu of actions. It switches resource views and can
+carry a filter; every action lives on a key instead:
+
+```
+:service       :svc         switch to services
+:node          :no          switch to nodes
+:volume        :vol         switch to volumes
+:network       :net         switch to networks
+:secret        :sec         switch to secrets
+:config        :cfg         switch to configs
+:service /web  switch to services filtered by "web"
+:service /!web keep everything that does NOT match
+```
+
+The prompt completes on `tab`, keeps a history you can walk with `↑`/`↓`,
+and `ctrl+a` shows the full alias table.
 
 **Context-sensitive actions** — the same key does different things depending
-on the resource view, and the footer shows the keys that apply right now:
+on the resource view, and the footer shows the keys that apply right now
+(k9s' "active keyboard mnemonics"):
 
 | View | Keys |
 |---|---|
-| services | `d` detail · `+`/`-` scale · `u` update · `R` rollback · `x` remove |
-| nodes | `D` drain · `A` activate · `p` promote · `w` demote · `x` remove |
+| services | `d` describe · `s` scale · `u` update · `R` rollback · `ctrl+d` delete |
+| nodes | `D` drain · `A` activate · `p` promote · `w` demote · `ctrl+d` delete |
 | tasks | `l` logs |
 | logs | `f` follow |
-| volumes / networks / secrets / configs | `x` remove |
+| volumes / networks / secrets / configs | `ctrl+d` delete |
 
-Global: `:` commands · `/` search · `r` refresh · `?` help · `esc`/`b` back ·
-`q` quit.
+The bindings follow k9s' conventions: `ctrl-d` deletes, `ctrl-r` refreshes,
+`d` describes, `l` shows logs. Destructive actions open a confirmation
+dialog whose focus starts on **Cancel**, so a stray `enter` cannot delete
+anything (`tab` moves the focus, `y`/`n` also work).
+
+Global: `:` command · `/` filter · `ctrl+r` refresh · `ctrl+a` aliases ·
+`?` help · `esc`/`b` back · `q` quit.
 
 **Robustness** — selection is tracked by **id**, so it survives live
 refreshes that reorder rows; the layout is computed from the terminal size;
@@ -87,11 +106,12 @@ manage a remote swarm; worker nodes fall back to polling.
 ## Keys
 
 ```
-:            command palette (switch resource, run actions)
-↑↓           navigate        enter/d  detail        l  logs        f  follow
-/            search          r        refresh       ?  help        esc/b back
-+ / -        scale           u        update        R  rollback    x  remove
+:            command prompt (switch resource, e.g. :svc, :node /filter)
+↑↓           navigate        d        describe      l  logs        f  follow
+/            filter          s        scale         u  update      R  rollback
+ctrl+d       delete          ctrl+r   refresh       ctrl+a aliases
 D / A        drain/activate  p / w    promote/demote
+esc/b        back            ?        help          q  quit
 ```
 
 ## Architecture
@@ -110,13 +130,17 @@ internal/ui/          Bubble Tea program
   app.go              root model, screens, layout, key dispatch
   keys.go             global keymap + the viewAction type
   viewactions.go      per-view, context-sensitive actions
+  command.go          the ":" command interpreter + resource alias table
+  commandview.go      the command prompt overlay and its key handling
+  aliases.go          the alias table overlay (ctrl+a)
+  prompt.go           value prompt (scale) + confirmation dialog
+  help.go             the contextual help overlay
   styles.go           adaptive light/dark theme, state colours
   table.go            ANSI-aware table renderer (see note below)
   views.go            table columns and coloured row builders
   commands.go         async loaders, follow, action runner
   actions.go          action handlers (scale, update, drain, …)
-  palette.go          command palette + help overlay
-  confirm.go          confirmation modal + overlay placement
+  confirm.go          overlay placement helpers
 internal/api/*_test.go  API tests against an in-process fake daemon
 internal/ui/*_test.go   model tests (selection stability, filtering, keys)
 pty_harness.py          drives the TUI in a pty with keystrokes

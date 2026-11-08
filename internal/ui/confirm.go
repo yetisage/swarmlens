@@ -3,53 +3,8 @@ package ui
 import (
 	"strings"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
-
-// confirm is a modal confirmation prompt for destructive actions.
-type confirm struct {
-	active bool
-	title  string
-	detail string
-	onYes  func(a *app) (tea.Model, tea.Cmd)
-}
-
-// ask opens the confirmation modal.
-func (c *confirm) ask(title, detail string, onYes func(a *app) (tea.Model, tea.Cmd)) {
-	c.active = true
-	c.title = title
-	c.detail = detail
-	c.onYes = onYes
-}
-
-// handleConfirmKey processes input while the confirmation modal is open.
-func (a *app) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "y", "Y", "enter":
-		cb := a.confirm.onYes
-		a.confirm.active = false
-		if cb != nil {
-			return cb(a)
-		}
-		return a, nil
-	case "n", "N", "esc", "q":
-		a.confirm.active = false
-		a.setStatus("cancelled")
-		return a, nil
-	}
-	return a, nil
-}
-
-// overlayConfirm draws the confirmation modal on top of the base view.
-func (a *app) overlayConfirm(base string) string {
-	body := titleStyle.Render(a.confirm.title) + "\n" +
-		dimStyle.Render(a.confirm.detail) + "\n\n" +
-		warnStyle.Render("y") + dimStyle.Render(" confirm   ") +
-		keyStyle.Render("n") + dimStyle.Render(" cancel")
-	box := overlayBox.Width(minInt(a.width-8, 70)).Render(body)
-	return placeOverlay(base, box, a.width, a.height)
-}
 
 // placeOverlay centres a box over a base view, truncating the base lines
 // where the box is drawn so the overlay stays on screen.

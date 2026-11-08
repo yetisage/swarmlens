@@ -124,9 +124,12 @@ type app struct {
 	search    textinput.Model
 	searching bool
 	filter    string
-	palette   palette
+	inverse   bool
+	command   commandMode
+	prompt    prompt
 	confirm   confirm
 	showHelp  bool
+	showAlias bool
 
 	status string
 	err    string
@@ -155,7 +158,8 @@ func NewApp(a *api.API, state *api.SwarmState) *app {
 	app.search.Placeholder = "filter…"
 	app.search.CharLimit = 64
 
-	app.palette = newPalette()
+	app.command = newCommandMode()
+	app.prompt = newPrompt()
 	return app
 }
 
@@ -291,8 +295,11 @@ func (a *app) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	if a.confirm.active {
 		return a.handleConfirmKey(msg)
 	}
-	if a.palette.active {
-		return a.handlePaletteKey(msg)
+	if a.command.active {
+		return a.handleCommandKey(msg)
+	}
+	if a.prompt.active {
+		return a.handlePromptKey(msg)
 	}
 	if a.searching {
 		switch k {
@@ -324,7 +331,7 @@ func (a *app) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.showHelp = !a.showHelp
 		return a, nil
 	case key.Matches(msg, a.keys.Palette):
-		a.palette.open(a.paletteCommands())
+		a.command.open()
 		return a, nil
 	case key.Matches(msg, a.keys.Search):
 		a.searching = true
@@ -332,6 +339,9 @@ func (a *app) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, a.search.Focus()
 	case key.Matches(msg, a.keys.Refresh):
 		return a, a.refreshCmd()
+	case key.Matches(msg, a.keys.AliasList):
+		a.showAlias = !a.showAlias
+		return a, nil
 	}
 
 	// Context-sensitive keys: the same key means different things
@@ -648,7 +658,7 @@ func (a *app) actionBar() string {
 	parts = append(parts,
 		keyStyle.Render(": cmd"),
 		keyStyle.Render("/ search"),
-		keyStyle.Render("r refresh"),
+		keyStyle.Render("ctrl+r refresh"),
 		keyStyle.Render("? help"),
 	)
 	return " " + strings.Join(parts, dimStyle.Render(" · ")) + "\n"
@@ -671,8 +681,14 @@ func (a *app) View() string {
 	if a.showHelp {
 		view = a.overlayHelp(view)
 	}
-	if a.palette.active {
-		view = a.overlayPalette(view)
+	if a.showAlias {
+		view = a.overlayAliases(view)
+	}
+	if a.command.active {
+		view = a.overlayCommand(view)
+	}
+	if a.prompt.active {
+		view = a.overlayPrompt(view)
 	}
 	if a.confirm.active {
 		view = a.overlayConfirm(view)

@@ -11,22 +11,24 @@ import (
 // palette (":") rather than a dedicated key per resource, so the letter
 // keys stay free for actions whose meaning follows the current view.
 type globalKeyMap struct {
-	Quit    key.Binding
-	Help    key.Binding
-	Palette key.Binding
-	Search  key.Binding
-	Refresh key.Binding
-	Back    key.Binding
+	Quit      key.Binding
+	Help      key.Binding
+	Palette   key.Binding
+	Search    key.Binding
+	Refresh   key.Binding
+	Back      key.Binding
+	AliasList key.Binding
 }
 
 func defaultGlobalKeys() globalKeyMap {
 	return globalKeyMap{
-		Quit:    key.NewBinding(key.WithKeys("ctrl+c", "q"), key.WithHelp("q", "quit")),
-		Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
-		Palette: key.NewBinding(key.WithKeys(":"), key.WithHelp(":", "commands")),
-		Search:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
-		Refresh: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
-		Back:    key.NewBinding(key.WithKeys("esc", "b"), key.WithHelp("esc", "back")),
+		Quit:      key.NewBinding(key.WithKeys("ctrl+c", "q"), key.WithHelp("q", "quit")),
+		Help:      key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+		Palette:   key.NewBinding(key.WithKeys(":"), key.WithHelp(":", "commands")),
+		Search:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+		Refresh:   key.NewBinding(key.WithKeys("ctrl+r"), key.WithHelp("ctrl+r", "refresh")),
+		Back:      key.NewBinding(key.WithKeys("esc", "b"), key.WithHelp("esc", "back")),
+		AliasList: key.NewBinding(key.WithKeys("ctrl+a"), key.WithHelp("ctrl+a", "aliases")),
 	}
 }
 
@@ -50,9 +52,10 @@ type helpEntry struct {
 // globalHelp describes the keys available everywhere.
 func (g globalKeyMap) globalHelp() []helpEntry {
 	return []helpEntry{
-		{":", "command palette (switch resource, run actions)"},
-		{"/", "search / filter"},
-		{"r", "refresh"},
+		{":", "switch resource (service, node, volume, …)"},
+		{"/", "filter the current view"},
+		{"ctrl+r", "refresh"},
+		{"ctrl+a", "show the resource aliases"},
 		{"?", "toggle help"},
 		{"esc / b", "back"},
 		{"q", "quit"},

@@ -208,9 +208,10 @@ func (a *app) filterServices(rows []api.ServiceRow) []api.ServiceRow {
 	q := strings.ToLower(a.filter)
 	out := make([]api.ServiceRow, 0, len(rows))
 	for _, r := range rows {
-		if strings.Contains(strings.ToLower(r.Name), q) ||
+		hit := strings.Contains(strings.ToLower(r.Name), q) ||
 			strings.Contains(strings.ToLower(r.Image), q) ||
-			strings.Contains(strings.ToLower(r.Mode), q) {
+			strings.Contains(strings.ToLower(r.Mode), q)
+		if hit != a.inverse {
 			out = append(out, r)
 		}
 	}
