@@ -1,0 +1,8 @@
+/swarmlens
+/probe
+/.gopath/
+/.gocache/
+events_*.ndjson
+events_*.log
+pty_session.raw
+timing.log
