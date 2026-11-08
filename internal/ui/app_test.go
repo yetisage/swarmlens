@@ -267,3 +267,26 @@ func splitLines(s string) []string {
 	out = append(out, cur)
 	return out
 }
+
+// TestAppDispatchesNavigationToTheTable checks that arrow keys reach the
+// table through the app's key handling, not just the table in isolation.
+func TestAppDispatchesNavigationToTheTable(t *testing.T) {
+	a := newTestApp()
+	a.screen = screenVolumes
+	var rows []api.VolumeRow
+	for i := 0; i < 10; i++ {
+		rows = append(rows, api.VolumeRow{Name: "vol", Driver: "local", Scope: "local", Created: "2025-06-01"})
+	}
+	a.volumes.SetRows(volumeTableRows(rows))
+	a.resize()
+
+	a.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	a.handleKey(tea.KeyMsg{Type: tea.KeyDown})
+	if got := a.volumes.Cursor(); got != 2 {
+		t.Errorf("cursor = %d, want 2 after two arrow-down presses", got)
+	}
+	a.handleKey(tea.KeyMsg{Type: tea.KeyUp})
+	if got := a.volumes.Cursor(); got != 1 {
+		t.Errorf("cursor = %d, want 1 after arrow-up", got)
+	}
+}

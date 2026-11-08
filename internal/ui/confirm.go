@@ -56,6 +56,12 @@ func (a *app) overlayConfirm(base string) string {
 func placeOverlay(base, box string, width, height int) string {
 	baseLines := strings.Split(base, "\n")
 	boxLines := strings.Split(box, "\n")
+
+	// A box taller than the terminal is clipped rather than pushing the
+	// view past the bottom of the screen.
+	if height > 0 && len(boxLines) > height {
+		boxLines = boxLines[:height]
+	}
 	boxWidth := lipgloss.Width(box)
 
 	top := (height - len(boxLines)) / 2
@@ -67,13 +73,23 @@ func placeOverlay(base, box string, width, height int) string {
 		left = 0
 	}
 
-	out := make([]string, 0, len(baseLines))
-	for i, line := range baseLines {
-		if i < top || i >= top+len(boxLines) {
-			out = append(out, line)
+	// The result must be tall enough to hold the whole box.
+	total := len(baseLines)
+	if need := top + len(boxLines); need > total {
+		total = need
+	}
+
+	out := make([]string, 0, total)
+	for i := 0; i < total; i++ {
+		line := ""
+		if i < len(baseLines) {
+			line = baseLines[i]
+		}
+		if i >= top && i < top+len(boxLines) {
+			out = append(out, truncateVisible(line, left)+boxLines[i-top])
 			continue
 		}
-		out = append(out, truncateVisible(line, left)+boxLines[i-top])
+		out = append(out, line)
 	}
 	return strings.Join(out, "\n")
 }

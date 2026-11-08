@@ -68,12 +68,26 @@ func (t *dataTable) SetCursor(n int) {
 // SetWidth sets the total render width.
 func (t *dataTable) SetWidth(w int) { t.width = w }
 
-// SetHeight sets how many rows are visible.
+// SetHeight sets the total height of the table, including the header and
+// the separator line.
 func (t *dataTable) SetHeight(h int) { t.height = h }
+
+// chrome is the number of lines the table spends on its header and
+// separator.
+const tableChrome = 2
+
+// rowsHeight is the height available for data rows.
+func (t dataTable) rowsHeight() int {
+	h := t.height - tableChrome
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
 
 // Update handles cursor movement keys.
 func (t dataTable) Update(msg tea.KeyMsg) (dataTable, tea.Cmd) {
-	page := max(1, t.height-1)
+	page := max(1, t.rowsHeight())
 	switch msg.String() {
 	case "up":
 		t.SetCursor(t.cursor - 1)
@@ -133,20 +147,18 @@ func (t dataTable) View() string {
 
 // window returns the visible row range.
 func (t dataTable) window() (int, int) {
-	if t.height <= 0 {
-		return 0, len(t.rows)
-	}
-	if len(t.rows) <= t.height {
+	avail := t.rowsHeight()
+	if len(t.rows) <= avail {
 		return 0, len(t.rows)
 	}
 	start := 0
-	if t.cursor >= t.height {
-		start = t.cursor - t.height + 1
+	if t.cursor >= avail {
+		start = t.cursor - avail + 1
 	}
 	if start < 0 {
 		start = 0
 	}
-	end := start + t.height
+	end := start + avail
 	if end > len(t.rows) {
 		end = len(t.rows)
 	}
