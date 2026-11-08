@@ -143,6 +143,64 @@ func (a *app) removeNode() (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
+// toggleFollow starts or stops streaming the task logs.
+func (a *app) toggleFollow() (tea.Model, tea.Cmd) {
+	a.follow = !a.follow
+	if a.follow {
+		a.setStatus("following logs (f to stop)")
+		return a, a.startFollow()
+	}
+	a.stopFollow()
+	a.setStatus("log follow stopped")
+	return a, nil
+}
+
+// removeVolume asks for confirmation and then deletes a volume.
+func (a *app) removeVolume() (tea.Model, tea.Cmd) {
+	v := a.currentVolume()
+	if v == nil {
+		a.setStatus("no volume selected")
+		return a, nil
+	}
+	name := v.Name
+	a.confirm.ask(
+		fmt.Sprintf("Remove volume %q?", name),
+		"Data in the volume is lost. The volume must not be in use.",
+		func(a *app) (tea.Model, tea.Cmd) {
+			return a, actionCmd(a, func(ctx context.Context) (string, error) {
+				if err := a.api.RemoveVolume(ctx, name, false); err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("removed volume %s", name), nil
+			})
+		},
+	)
+	return a, nil
+}
+
+// removeNetwork asks for confirmation and then deletes a network.
+func (a *app) removeNetwork() (tea.Model, tea.Cmd) {
+	n := a.currentNetwork()
+	if n == nil {
+		a.setStatus("no network selected")
+		return a, nil
+	}
+	name := n.Name
+	a.confirm.ask(
+		fmt.Sprintf("Remove network %q?", name),
+		"Attached containers are disconnected. Built-in networks cannot be removed.",
+		func(a *app) (tea.Model, tea.Cmd) {
+			return a, actionCmd(a, func(ctx context.Context) (string, error) {
+				if err := a.api.RemoveNetwork(ctx, name); err != nil {
+					return "", err
+				}
+				return fmt.Sprintf("removed network %s", name), nil
+			})
+		},
+	)
+	return a, nil
+}
+
 // removeSecret deletes a swarm secret after checking that no service uses it.
 func (a *app) removeSecret() (tea.Model, tea.Cmd) {
 	idx := a.secrets.Cursor()

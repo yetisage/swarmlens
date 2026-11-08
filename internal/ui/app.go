@@ -332,98 +332,50 @@ func (a *app) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, a.search.Focus()
 	case key.Matches(msg, a.keys.Refresh):
 		return a, a.refreshCmd()
-	case key.Matches(msg, a.keys.Services):
-		return a.goTo(screenServices)
-	case key.Matches(msg, a.keys.Nodes):
-		return a.goTo(screenNodes)
-	case key.Matches(msg, a.keys.Volumes):
-		return a.goTo(screenVolumes)
-	case key.Matches(msg, a.keys.Networks):
-		return a.goTo(screenNetworks)
-	case key.Matches(msg, a.keys.Secrets):
-		return a.goTo(screenSecrets)
-	case key.Matches(msg, a.keys.Configs):
-		return a.goTo(screenConfigs)
 	}
 
-	// Screen-specific keys.
-	switch a.screen {
-	case screenServices:
-		switch {
-		case key.Matches(msg, a.keys.Details):
-			return a.openDetail()
-		case key.Matches(msg, a.keys.ScaleUp):
-			return a.scaleService(+1)
-		case key.Matches(msg, a.keys.ScaleDown):
-			return a.scaleService(-1)
-		case key.Matches(msg, a.keys.Update):
-			return a.forceUpdateService()
-		case key.Matches(msg, a.keys.Rollback):
-			return a.rollbackService()
-		case key.Matches(msg, a.keys.Remove):
-			return a.removeService()
+	// Context-sensitive keys: the same key means different things
+	// depending on the resource view we are in.
+	for _, act := range a.viewActions() {
+		if !key.Matches(msg, act.binding) {
+			continue
 		}
-		a.services, _ = a.services.Update(msg)
-
-	case screenNodes:
-		switch {
-		case key.Matches(msg, a.keys.Drain):
-			return a.setNodeAvailability("drain")
-		case key.Matches(msg, a.keys.Activate):
-			return a.setNodeAvailability("active")
-		case key.Matches(msg, a.keys.Promote):
-			return a.setNodeRole("manager")
-		case key.Matches(msg, a.keys.Demote):
-			return a.setNodeRole("worker")
-		case key.Matches(msg, a.keys.Remove):
-			return a.removeNode()
-		}
-		a.nodes, _ = a.nodes.Update(msg)
-
-	case screenDetail:
-		switch {
-		case key.Matches(msg, a.keys.Back):
-			return a.goTo(screenServices)
-		case key.Matches(msg, a.keys.Logs):
-			return a.openLogs()
-		}
-		a.tasks, _ = a.tasks.Update(msg)
-
-	case screenLogs:
-		switch {
-		case key.Matches(msg, a.keys.Back):
-			a.stopFollow()
-			return a.goTo(screenDetail)
-		case key.Matches(msg, a.keys.Logs):
-			a.stopFollow()
-			return a.goTo(screenDetail)
-		case key.Matches(msg, a.keys.Follow):
-			a.follow = !a.follow
-			if a.follow {
-				a.setStatus("following logs (f to stop)")
-				return a, a.startFollow()
-			}
-			a.stopFollow()
-			a.setStatus("log follow stopped")
+		if act.enabled != nil && !act.enabled(a) {
+			a.setStatus(act.desc + " is not available for the selected item")
 			return a, nil
 		}
-		a.logs, _ = a.logs.Update(msg)
+		return act.run(a)
+	}
 
+	// Back is only meaningful in the sub-views.
+	if key.Matches(msg, a.keys.Back) {
+		switch a.screen {
+		case screenDetail:
+			return a.goTo(screenServices)
+		case screenLogs:
+			a.stopFollow()
+			return a.goTo(screenDetail)
+		}
+		return a, nil
+	}
+
+	// Table navigation.
+	switch a.screen {
+	case screenServices:
+		a.services, _ = a.services.Update(msg)
+	case screenNodes:
+		a.nodes, _ = a.nodes.Update(msg)
+	case screenDetail:
+		a.tasks, _ = a.tasks.Update(msg)
+	case screenLogs:
+		a.logs, _ = a.logs.Update(msg)
 	case screenVolumes:
 		a.volumes, _ = a.volumes.Update(msg)
 	case screenNetworks:
 		a.networks, _ = a.networks.Update(msg)
 	case screenSecrets:
-		switch {
-		case key.Matches(msg, a.keys.Remove):
-			return a.removeSecret()
-		}
 		a.secrets, _ = a.secrets.Update(msg)
 	case screenConfigs:
-		switch {
-		case key.Matches(msg, a.keys.Remove):
-			return a.removeConfig()
-		}
 		a.configs, _ = a.configs.Update(msg)
 	}
 	return a, nil
@@ -524,6 +476,24 @@ func (a *app) currentNode() *api.NodeRow {
 		}
 	}
 	return nil
+}
+
+// currentVolume resolves the selected volume from the current data.
+func (a *app) currentVolume() *api.VolumeRow {
+	idx := a.volumes.Cursor()
+	if idx < 0 || idx >= len(a.volumeRows) {
+		return nil
+	}
+	return &a.volumeRows[idx]
+}
+
+// currentNetwork resolves the selected network from the current data.
+func (a *app) currentNetwork() *api.NetworkRow {
+	idx := a.networks.Cursor()
+	if idx < 0 || idx >= len(a.networkRows) {
+		return nil
+	}
+	return &a.networkRows[idx]
 }
 
 func (a *app) currentServiceName() string {
@@ -627,9 +597,10 @@ func (a *app) resize() {
 }
 
 // chromeHeight returns the number of rows the surrounding chrome (header,
-// optional detail header, status bar) occupies for the current screen.
+// action bar, optional detail header, status bar) occupies for the current
+// screen.
 func (a *app) chromeHeight() int {
-	n := 2 // header + status bar
+	n := 3 // header + action bar + status bar
 	if a.screen == screenDetail {
 		n += 3 // detail header
 	}
@@ -637,6 +608,50 @@ func (a *app) chromeHeight() int {
 		n++
 	}
 	return n
+}
+
+// viewName is the name of the current resource view.
+func (a *app) viewName() string {
+	switch a.screen {
+	case screenServices:
+		return "services"
+	case screenNodes:
+		return "nodes"
+	case screenDetail:
+		return "tasks"
+	case screenLogs:
+		return "logs"
+	case screenVolumes:
+		return "volumes"
+	case screenNetworks:
+		return "networks"
+	case screenSecrets:
+		return "secrets"
+	case screenConfigs:
+		return "configs"
+	}
+	return "swarmlens"
+}
+
+// actionBar lists the keys that apply to the current view, the way k9s
+// shows context-sensitive aliases.
+func (a *app) actionBar() string {
+	var parts []string
+	for _, act := range a.viewActions() {
+		enabled := act.enabled == nil || act.enabled(a)
+		style := keyStyle
+		if !enabled {
+			style = dimStyle
+		}
+		parts = append(parts, style.Render(act.label))
+	}
+	parts = append(parts,
+		keyStyle.Render(": cmd"),
+		keyStyle.Render("/ search"),
+		keyStyle.Render("r refresh"),
+		keyStyle.Render("? help"),
+	)
+	return " " + strings.Join(parts, dimStyle.Render(" · ")) + "\n"
 }
 
 func (a *app) View() string {
@@ -649,6 +664,7 @@ func (a *app) View() string {
 		b.WriteString(a.searchLine())
 	}
 	b.WriteString(a.bodyView())
+	b.WriteString(a.actionBar())
 	b.WriteString(a.statusLine())
 
 	view := b.String()
@@ -702,26 +718,38 @@ func (a *app) headerLine() string {
 	if name == "" {
 		name = "swarm"
 	}
-	left := lipgloss.JoinHorizontal(lipgloss.Left,
-		titleStyle.Render(fmt.Sprintf(" swarmlens · %s ", name)),
-		dimStyle.Render(fmt.Sprintf(" node: %s ", a.state.State)),
-	)
+
+	// The optional parts are dropped one by one when the terminal is too
+	// narrow, so the key hints on the right always stay intact.
+	optional := []string{}
 	if a.state.Role != "" {
-		left = lipgloss.JoinHorizontal(lipgloss.Left, left,
-			dimStyle.Render(fmt.Sprintf(" role: %s ", a.state.Role)),
-		)
+		optional = append(optional, fmt.Sprintf(" role: %s ", a.state.Role))
 	}
 	if ep := a.api.Endpoint(); ep != "" {
-		left = lipgloss.JoinHorizontal(lipgloss.Left, left,
-			dimStyle.Render(fmt.Sprintf(" %s ", ep)),
-		)
+		optional = append(optional, fmt.Sprintf(" %s ", ep))
 	}
-	right := keyStyle.Render(" s svc  n nodes  / search  : cmd  ? help  q quit ")
-	pad := a.width - lipgloss.Width(left) - lipgloss.Width(right) - 1
-	if pad < 1 {
-		pad = 1
+
+	right := keyStyle.Render(" : cmd  ? help  q quit ")
+	base := titleStyle.Render(fmt.Sprintf(" swarmlens · %s ", name)) +
+		dimStyle.Render(fmt.Sprintf(" node: %s ", a.state.State))
+
+	for {
+		left := base
+		for _, o := range optional {
+			left += dimStyle.Render(o)
+		}
+		gap := a.width - lipgloss.Width(left) - lipgloss.Width(right) - 1
+		if gap >= 1 {
+			return left + " " + strings.Repeat(" ", gap) + right + "\n"
+		}
+		if len(optional) == 0 {
+			// Even the minimum does not fit: keep the key hints and cut
+			// the title short.
+			keep := max(0, a.width-lipgloss.Width(right)-1)
+			return truncateVisible(base, keep) + " " + right + "\n"
+		}
+		optional = optional[:len(optional)-1]
 	}
-	return left + " " + strings.Repeat(" ", pad) + right + "\n"
 }
 
 func (a *app) searchLine() string {

@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -138,23 +139,109 @@ func TestApplyFilterUpdatesTable(t *testing.T) {
 	}
 }
 
-func TestGlobalKeySwitchesScreens(t *testing.T) {
-	a := newTestApp()
+// TestPaletteSwitchesResourceViews checks that resource types are reached
+// through the command palette, as in k9s, rather than via dedicated keys.
+func TestPaletteSwitchesResourceViews(t *testing.T) {
+	cases := []struct {
+		alias string
+		want  screen
+	}{
+		{"svc", screenServices},
+		{"nodes", screenNodes},
+		{"vol", screenVolumes},
+		{"net", screenNetworks},
+		{"sec", screenSecrets},
+		{"cfg", screenConfigs},
+	}
+	for _, c := range cases {
+		a := newTestApp()
+		a.palette.open(a.paletteCommands())
 
-	if _, _ = a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}); a.screen != screenNodes {
-		t.Errorf("screen = %v, want nodes", a.screen)
+		// Type the alias.
+		a.palette.input.SetValue(c.alias)
+		a.palette.applyFilter()
+		if len(a.palette.filtered) == 0 {
+			t.Fatalf("alias %q matched no command", c.alias)
+		}
+
+		// Enter runs the first match.
+		a.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+		if a.screen != c.want {
+			t.Errorf("alias %q switched to %v, want %v", c.alias, a.screen, c.want)
+		}
 	}
-	if _, _ = a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}}); a.screen != screenVolumes {
-		t.Errorf("screen = %v, want volumes", a.screen)
+}
+
+// TestSingleLetterKeysDoNotSwitchViews makes sure the letter keys are free
+// for context-sensitive actions.
+func TestSingleLetterKeysDoNotSwitchViews(t *testing.T) {
+	a := newTestApp()
+	for _, r := range []rune{'s', 'n', 'v', 'w', 'k', 'c'} {
+		a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		if a.screen != screenServices {
+			t.Errorf("pressing %q switched to %v, want to stay on services", r, a.screen)
+		}
 	}
-	if _, _ = a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}}); a.screen != screenSecrets {
-		t.Errorf("screen = %v, want secrets", a.screen)
+}
+
+// TestSameKeyMeansDifferentThingsPerView checks the k9s-style behaviour:
+// "x" removes a service in the services view and a node in the nodes view.
+func TestSameKeyMeansDifferentThingsPerView(t *testing.T) {
+	a := newTestApp()
+	a.applyServices([]api.ServiceRow{svc("id-a", "web", 1, 1)})
+	a.services.SetCursor(0)
+	a.selectedServiceID = "id-a"
+
+	// In the services view, "x" asks to remove the service.
+	a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if !a.confirm.active {
+		t.Fatal("expected a confirmation prompt in the services view")
 	}
-	if _, _ = a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'c'}}); a.screen != screenConfigs {
-		t.Errorf("screen = %v, want configs", a.screen)
+	if !strings.Contains(a.confirm.title, "web") {
+		t.Errorf("confirmation mentions %q, want the service name", a.confirm.title)
 	}
-	if _, _ = a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}}); a.screen != screenServices {
-		t.Errorf("screen = %v, want services", a.screen)
+	a.confirm.active = false
+
+	// In the nodes view, the same key asks to remove the node.
+	a.screen = screenNodes
+	a.nodeRows = []api.NodeRow{{ID: "node-1", Hostname: "worker-1", Role: "worker", Availability: "active", Status: "ready"}}
+	a.applyNodes(a.nodeRows)
+	a.nodes.SetCursor(0)
+	a.selectedNodeID = "node-1"
+
+	a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	if !a.confirm.active {
+		t.Fatal("expected a confirmation prompt in the nodes view")
+	}
+	if !strings.Contains(a.confirm.title, "worker-1") {
+		t.Errorf("confirmation mentions %q, want the node name", a.confirm.title)
+	}
+}
+
+// TestActionBarShowsCurrentViewKeys checks that the footer lists the keys
+// that apply to the current resource view.
+func TestActionBarShowsCurrentViewKeys(t *testing.T) {
+	a := newTestApp()
+	a.applyServices([]api.ServiceRow{svc("id-a", "web", 1, 1)})
+	a.services.SetCursor(0)
+	a.selectedServiceID = "id-a"
+
+	bar := a.actionBar()
+	for _, want := range []string{"+ scale", "- scale", "u update", "x remove"} {
+		if !strings.Contains(bar, want) {
+			t.Errorf("action bar %q is missing %q", bar, want)
+		}
+	}
+
+	a.screen = screenNodes
+	bar = a.actionBar()
+	for _, want := range []string{"D drain", "A activate", "p promote", "w demote"} {
+		if !strings.Contains(bar, want) {
+			t.Errorf("node action bar %q is missing %q", bar, want)
+		}
+	}
+	if strings.Contains(bar, "scale") {
+		t.Errorf("node action bar should not offer scaling: %q", bar)
 	}
 }
 

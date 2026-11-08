@@ -120,6 +120,16 @@ func (a *API) RemoveNode(ctx context.Context, nodeID string) error {
 	return a.cli.NodeRemove(ctx, nodeID, swarm.NodeRemoveOptions{Force: true})
 }
 
+// RemoveVolume deletes an engine volume.
+func (a *API) RemoveVolume(ctx context.Context, name string, force bool) error {
+	return a.cli.VolumeRemove(ctx, name, force)
+}
+
+// RemoveNetwork deletes an engine network.
+func (a *API) RemoveNetwork(ctx context.Context, name string) error {
+	return a.cli.NetworkRemove(ctx, name)
+}
+
 // CreateService creates a replicated service. It is used by the smoke test
 // to exercise the mutating paths without touching existing services.
 func (a *API) CreateService(ctx context.Context, name, image string, replicas int) error {

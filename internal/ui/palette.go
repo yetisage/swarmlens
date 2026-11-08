@@ -12,7 +12,10 @@ import (
 type paletteItem struct {
 	title string
 	desc  string
-	run   func(a *app) (tea.Model, tea.Cmd)
+	// aliases are extra prefixes that select this command, in the spirit of
+	// k9s' short resource aliases ("svc", "po", …).
+	aliases []string
+	run     func(a *app) (tea.Model, tea.Cmd)
 }
 
 // palette is the k9s-style command palette (opened with ':').
@@ -42,13 +45,22 @@ func (p *palette) open(items []paletteItem) {
 }
 
 // matches reports whether the query matches the item (case-insensitive
-// substring on title or description).
+// substring on title, description or alias).
 func (p *palette) matches(it paletteItem, q string) bool {
 	if q == "" {
 		return true
 	}
-	return strings.Contains(strings.ToLower(it.title), strings.ToLower(q)) ||
-		strings.Contains(strings.ToLower(it.desc), strings.ToLower(q))
+	lq := strings.ToLower(q)
+	if strings.Contains(strings.ToLower(it.title), lq) ||
+		strings.Contains(strings.ToLower(it.desc), lq) {
+		return true
+	}
+	for _, alias := range it.aliases {
+		if alias == lq {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *palette) applyFilter() {
@@ -140,16 +152,41 @@ func (a *app) overlayPalette(base string) string {
 }
 
 // paletteCommands builds the command list for the current screen.
+//
+// Like k9s, the palette is the way to switch between resource types; each
+// resource also has short aliases so "svc" is enough to jump to services.
 func (a *app) paletteCommands() []paletteItem {
 	items := []paletteItem{
-		{"services", "switch to the services view", func(a *app) (tea.Model, tea.Cmd) { return a.goTo(screenServices) }},
-		{"nodes", "switch to the nodes view", func(a *app) (tea.Model, tea.Cmd) { return a.goTo(screenNodes) }},
-		{"volumes", "switch to the volumes view", func(a *app) (tea.Model, tea.Cmd) { return a.goTo(screenVolumes) }},
-		{"networks", "switch to the networks view", func(a *app) (tea.Model, tea.Cmd) { return a.goTo(screenNetworks) }},
-		{"secrets", "switch to the secrets view", func(a *app) (tea.Model, tea.Cmd) { return a.goTo(screenSecrets) }},
-		{"configs", "switch to the configs view", func(a *app) (tea.Model, tea.Cmd) { return a.goTo(screenConfigs) }},
-		{"refresh", "reload all data", func(a *app) (tea.Model, tea.Cmd) { return a, a.refreshCmd() }},
-		{"help", "toggle the help view", func(a *app) (tea.Model, tea.Cmd) { a.showHelp = !a.showHelp; return a, nil }},
+		{title: "services", desc: "switch to the services view", aliases: []string{"svc", "service", "s"},
+			run: func(a *app) (tea.Model, tea.Cmd) { return a.goTo(screenServices) }},
+		{title: "nodes", desc: "switch to the nodes view", aliases: []string{"node", "no", "nd"},
+			run: func(a *app) (tea.Model, tea.Cmd) { return a.goTo(screenNodes) }},
+		{title: "volumes", desc: "switch to the volumes view", aliases: []string{"vol", "volume", "v"},
+			run: func(a *app) (tea.Model, tea.Cmd) { return a.goTo(screenVolumes) }},
+		{title: "networks", desc: "switch to the networks view", aliases: []string{"net", "network", "nw"},
+			run: func(a *app) (tea.Model, tea.Cmd) { return a.goTo(screenNetworks) }},
+		{title: "secrets", desc: "switch to the secrets view", aliases: []string{"secret", "sec"},
+			run: func(a *app) (tea.Model, tea.Cmd) { return a.goTo(screenSecrets) }},
+		{title: "configs", desc: "switch to the configs view", aliases: []string{"config", "cfg"},
+			run: func(a *app) (tea.Model, tea.Cmd) { return a.goTo(screenConfigs) }},
+		{title: "refresh", desc: "reload all data", aliases: []string{"reload"},
+			run: func(a *app) (tea.Model, tea.Cmd) { return a, a.refreshCmd() }},
+		{title: "help", desc: "toggle the help view", aliases: []string{"keybindings"},
+			run: func(a *app) (tea.Model, tea.Cmd) { a.showHelp = !a.showHelp; return a, nil }},
+	}
+
+	// The actions of the current view are also reachable from the palette,
+	// so everything can be done without the keyboard shortcuts.
+	for _, act := range a.viewActions() {
+		if act.enabled != nil && !act.enabled(a) {
+			continue
+		}
+		act := act
+		items = append(items, paletteItem{
+			title: act.label,
+			desc:  act.desc,
+			run:   func(a *app) (tea.Model, tea.Cmd) { return act.run(a) },
+		})
 	}
 
 	switch a.screen {
@@ -157,46 +194,66 @@ func (a *app) paletteCommands() []paletteItem {
 		if s := a.currentService(); s != nil {
 			name := s.Name
 			items = append(items,
-				paletteItem{"scale up " + name, "add one replica", func(a *app) (tea.Model, tea.Cmd) { return a.scaleService(+1) }},
-				paletteItem{"scale down " + name, "remove one replica", func(a *app) (tea.Model, tea.Cmd) { return a.scaleService(-1) }},
-				paletteItem{"update " + name, "force a rolling update", func(a *app) (tea.Model, tea.Cmd) { return a.forceUpdateService() }},
-				paletteItem{"rollback " + name, "restore the previous spec", func(a *app) (tea.Model, tea.Cmd) { return a.rollbackService() }},
-				paletteItem{"remove " + name, "delete the service", func(a *app) (tea.Model, tea.Cmd) { return a.removeService() }},
-				paletteItem{"details of " + name, "open the task list", func(a *app) (tea.Model, tea.Cmd) { return a.openDetail() }},
+				paletteItem{title: "scale up " + name, desc: "add one replica", run: func(a *app) (tea.Model, tea.Cmd) { return a.scaleService(+1) }},
+				paletteItem{title: "scale down " + name, desc: "remove one replica", run: func(a *app) (tea.Model, tea.Cmd) { return a.scaleService(-1) }},
+				paletteItem{title: "update " + name, desc: "force a rolling update", run: func(a *app) (tea.Model, tea.Cmd) { return a.forceUpdateService() }},
+				paletteItem{title: "rollback " + name, desc: "restore the previous spec", run: func(a *app) (tea.Model, tea.Cmd) { return a.rollbackService() }},
+				paletteItem{title: "remove " + name, desc: "delete the service", run: func(a *app) (tea.Model, tea.Cmd) { return a.removeService() }},
+				paletteItem{title: "details of " + name, desc: "open the task list", run: func(a *app) (tea.Model, tea.Cmd) { return a.openDetail() }},
 			)
 		}
 	case screenNodes:
 		if n := a.currentNode(); n != nil {
 			host := n.Hostname
 			items = append(items,
-				paletteItem{"drain " + host, "stop scheduling new tasks", func(a *app) (tea.Model, tea.Cmd) { return a.setNodeAvailability("drain") }},
-				paletteItem{"activate " + host, "resume scheduling", func(a *app) (tea.Model, tea.Cmd) { return a.setNodeAvailability("active") }},
-				paletteItem{"promote " + host, "make it a manager", func(a *app) (tea.Model, tea.Cmd) { return a.setNodeRole("manager") }},
-				paletteItem{"demote " + host, "make it a worker", func(a *app) (tea.Model, tea.Cmd) { return a.setNodeRole("worker") }},
-				paletteItem{"remove " + host, "remove the node from the swarm", func(a *app) (tea.Model, tea.Cmd) { return a.removeNode() }},
+				paletteItem{title: "drain " + host, desc: "stop scheduling new tasks", run: func(a *app) (tea.Model, tea.Cmd) { return a.setNodeAvailability("drain") }},
+				paletteItem{title: "activate " + host, desc: "resume scheduling", run: func(a *app) (tea.Model, tea.Cmd) { return a.setNodeAvailability("active") }},
+				paletteItem{title: "promote " + host, desc: "make it a manager", run: func(a *app) (tea.Model, tea.Cmd) { return a.setNodeRole("manager") }},
+				paletteItem{title: "demote " + host, desc: "make it a worker", run: func(a *app) (tea.Model, tea.Cmd) { return a.setNodeRole("worker") }},
+				paletteItem{title: "remove " + host, desc: "remove the node from the swarm", run: func(a *app) (tea.Model, tea.Cmd) { return a.removeNode() }},
 			)
 		}
 	case screenDetail:
 		if t := a.currentTask(); t != nil {
 			name := t.Name
 			items = append(items,
-				paletteItem{"logs of " + name, "open the log viewer", func(a *app) (tea.Model, tea.Cmd) { return a.openLogs() }},
+				paletteItem{title: "logs of " + name, desc: "open the log viewer", run: func(a *app) (tea.Model, tea.Cmd) { return a.openLogs() }},
 			)
 		}
 	}
 	return items
 }
 
-// overlayHelp draws the help view on top of the base view.
+// overlayHelp draws the help view on top of the base view. It lists the
+// actions of the current view first, since those are the ones whose
+// meaning follows the resource type.
 func (a *app) overlayHelp(base string) string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render(" keybindings"))
+	b.WriteString(titleStyle.Render(" " + a.viewName() + " — keybindings"))
 	b.WriteString("\n")
-	for _, h := range a.keys.help() {
-		b.WriteString(keyStyle.Render(fmt.Sprintf("%-22s", h.key)))
+
+	for _, act := range a.viewActions() {
+		keys := act.binding.Keys()
+		if len(keys) == 0 {
+			continue
+		}
+		label := keys[0]
+		if len(keys) > 1 {
+			label = keys[0] + "/" + keys[1]
+		}
+		b.WriteString(keyStyle.Render(fmt.Sprintf("%-12s", label)))
+		b.WriteString(dimStyle.Render(act.desc))
+		b.WriteString("\n")
+	}
+
+	b.WriteString(dimStyle.Render("── global ──"))
+	b.WriteString("\n")
+	for _, h := range a.keys.globalHelp() {
+		b.WriteString(keyStyle.Render(fmt.Sprintf("%-12s", h.key)))
 		b.WriteString(dimStyle.Render(h.desc))
 		b.WriteString("\n")
 	}
-	box := helpBoxStyle.Width(minInt(a.width-8, 76)).Render(strings.TrimRight(b.String(), "\n"))
+
+	box := helpBoxStyle.Width(minInt(a.width-8, 72)).Render(strings.TrimRight(b.String(), "\n"))
 	return placeOverlay(base, box, a.width, a.height)
 }

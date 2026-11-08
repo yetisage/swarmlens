@@ -1,62 +1,44 @@
 package ui
 
-import "github.com/charmbracelet/bubbles/key"
+import (
+	"github.com/charmbracelet/bubbles/key"
+	tea "github.com/charmbracelet/bubbletea"
+)
 
-// Global keys are available on every screen.
+// globalKeyMap holds the keys that behave the same in every view.
+//
+// Like k9s, switching between resource types is done through the command
+// palette (":") rather than a dedicated key per resource, so the letter
+// keys stay free for actions whose meaning follows the current view.
 type globalKeyMap struct {
-	Quit      key.Binding
-	Services  key.Binding
-	Nodes     key.Binding
-	Volumes   key.Binding
-	Networks  key.Binding
-	Secrets   key.Binding
-	Configs   key.Binding
-	Search    key.Binding
-	Palette   key.Binding
-	Refresh   key.Binding
-	Help      key.Binding
-	Back      key.Binding
-	Details   key.Binding
-	Logs      key.Binding
-	ScaleUp   key.Binding
-	ScaleDown key.Binding
-	Update    key.Binding
-	Rollback  key.Binding
-	Remove    key.Binding
-	Drain     key.Binding
-	Activate  key.Binding
-	Promote   key.Binding
-	Demote    key.Binding
-	Follow    key.Binding
+	Quit    key.Binding
+	Help    key.Binding
+	Palette key.Binding
+	Search  key.Binding
+	Refresh key.Binding
+	Back    key.Binding
 }
 
 func defaultGlobalKeys() globalKeyMap {
 	return globalKeyMap{
-		Quit:      key.NewBinding(key.WithKeys("ctrl+c", "q"), key.WithHelp("q", "quit")),
-		Services:  key.NewBinding(key.WithKeys("s"), key.WithHelp("s", "services")),
-		Nodes:     key.NewBinding(key.WithKeys("n"), key.WithHelp("n", "nodes")),
-		Volumes:   key.NewBinding(key.WithKeys("v"), key.WithHelp("v", "volumes")),
-		Networks:  key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "networks")),
-		Secrets:   key.NewBinding(key.WithKeys("k"), key.WithHelp("k", "secrets")),
-		Configs:   key.NewBinding(key.WithKeys("c"), key.WithHelp("c", "configs")),
-		Search:    key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
-		Palette:   key.NewBinding(key.WithKeys(":"), key.WithHelp(":", "commands")),
-		Refresh:   key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
-		Help:      key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
-		Back:      key.NewBinding(key.WithKeys("esc", "b"), key.WithHelp("esc", "back")),
-		Details:   key.NewBinding(key.WithKeys("enter", "d"), key.WithHelp("d", "detail")),
-		Logs:      key.NewBinding(key.WithKeys("l"), key.WithHelp("l", "logs")),
-		ScaleUp:   key.NewBinding(key.WithKeys("+", "="), key.WithHelp("+", "scale up")),
-		ScaleDown: key.NewBinding(key.WithKeys("-"), key.WithHelp("-", "scale down")),
-		Update:    key.NewBinding(key.WithKeys("u"), key.WithHelp("u", "update")),
-		Rollback:  key.NewBinding(key.WithKeys("R"), key.WithHelp("R", "rollback")),
-		Remove:    key.NewBinding(key.WithKeys("x"), key.WithHelp("x", "remove")),
-		Drain:     key.NewBinding(key.WithKeys("D"), key.WithHelp("D", "drain")),
-		Activate:  key.NewBinding(key.WithKeys("A"), key.WithHelp("A", "activate")),
-		Promote:   key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "promote")),
-		Demote:    key.NewBinding(key.WithKeys("w"), key.WithHelp("w", "demote")),
-		Follow:    key.NewBinding(key.WithKeys("f"), key.WithHelp("f", "follow")),
+		Quit:    key.NewBinding(key.WithKeys("ctrl+c", "q"), key.WithHelp("q", "quit")),
+		Help:    key.NewBinding(key.WithKeys("?"), key.WithHelp("?", "help")),
+		Palette: key.NewBinding(key.WithKeys(":"), key.WithHelp(":", "commands")),
+		Search:  key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
+		Refresh: key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "refresh")),
+		Back:    key.NewBinding(key.WithKeys("esc", "b"), key.WithHelp("esc", "back")),
 	}
+}
+
+// viewAction is a key binding whose meaning depends on the current view.
+// The same key can do different things in different views, which is how
+// k9s keeps a single-letter vocabulary.
+type viewAction struct {
+	binding key.Binding
+	label   string // short hint shown in the action bar
+	desc    string // long description shown in the help view
+	enabled func(a *app) bool
+	run     func(a *app) (tea.Model, tea.Cmd)
 }
 
 // helpEntry is one row of the help view.
@@ -65,24 +47,14 @@ type helpEntry struct {
 	desc string
 }
 
-func (g globalKeyMap) help() []helpEntry {
+// globalHelp describes the keys available everywhere.
+func (g globalKeyMap) globalHelp() []helpEntry {
 	return []helpEntry{
-		{"s / n / v / w / k / c", "services · nodes · volumes · networks · secrets · configs"},
-		{"↑ ↓", "move cursor"},
-		{"enter / d", "open detail"},
-		{"l", "task logs"},
-		{"f", "toggle log follow"},
+		{":", "command palette (switch resource, run actions)"},
 		{"/", "search / filter"},
-		{":", "command palette"},
-		{"+ / -", "scale service up / down"},
-		{"u", "force update service"},
-		{"R", "rollback service"},
-		{"x", "remove (with confirmation)"},
-		{"D / A", "drain / activate node"},
-		{"p / w", "promote / demote node"},
 		{"r", "refresh"},
-		{"esc / b", "back"},
 		{"?", "toggle help"},
+		{"esc / b", "back"},
 		{"q", "quit"},
 	}
 }

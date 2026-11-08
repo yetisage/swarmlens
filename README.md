@@ -40,9 +40,24 @@ fallback (and the only source on worker nodes).
 | `D` / `A` | drain / activate the selected node |
 | `p` / `w` | promote / demote the selected node |
 
-**Navigation** — `/` search & filter · `:` command palette (context-aware:
-offers the actions for the current screen and selection) · `?` help overlay ·
-`f` toggle log follow.
+**Navigation** — like k9s, resource types are reached through the **command
+palette** (`:`, or `:` plus a short alias such as `svc`, `no`, `vol`, `net`,
+`sec`, `cfg`), not through a dedicated key per resource. The letter keys
+stay free for actions whose meaning follows the current view.
+
+**Context-sensitive actions** — the same key does different things depending
+on the resource view, and the footer shows the keys that apply right now:
+
+| View | Keys |
+|---|---|
+| services | `d` detail · `+`/`-` scale · `u` update · `R` rollback · `x` remove |
+| nodes | `D` drain · `A` activate · `p` promote · `w` demote · `x` remove |
+| tasks | `l` logs |
+| logs | `f` follow |
+| volumes / networks / secrets / configs | `x` remove |
+
+Global: `:` commands · `/` search · `r` refresh · `?` help · `esc`/`b` back ·
+`q` quit.
 
 **Robustness** — selection is tracked by **id**, so it survives live
 refreshes that reorder rows; the layout is computed from the terminal size;
@@ -72,9 +87,9 @@ manage a remote swarm; worker nodes fall back to polling.
 ## Keys
 
 ```
-s/n/v/w/k/c  services · nodes · volumes · networks · secrets · configs
+:            command palette (switch resource, run actions)
 ↑↓           navigate        enter/d  detail        l  logs        f  follow
-/            search          :        commands      ?  help        q  quit
+/            search          r        refresh       ?  help        esc/b back
 + / -        scale           u        update        R  rollback    x  remove
 D / A        drain/activate  p / w    promote/demote
 ```
@@ -93,7 +108,8 @@ internal/api/         Docker Engine API facade
   ssh.go              ssh:// endpoint support
 internal/ui/          Bubble Tea program
   app.go              root model, screens, layout, key dispatch
-  keys.go             keymap + help text
+  keys.go             global keymap + the viewAction type
+  viewactions.go      per-view, context-sensitive actions
   styles.go           adaptive light/dark theme, state colours
   table.go            ANSI-aware table renderer (see note below)
   views.go            table columns and coloured row builders
