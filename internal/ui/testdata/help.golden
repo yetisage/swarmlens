@@ -1,0 +1,38 @@
+Context:  demo [RW]               <esc> Back                                                                               __    __
+Swarm:    acme-prod (6/7 ready)   <?>   Help                                                                              /  \__/  \  swarm
+Node:     manager-1 (leader)                                                                                              \__/  \__/  lens
+SL Rev:   test                                                                                                            /  \__/  \
+Docker:   29.8.2                                                                                                          \__/  \__/
+Services: 12/14
+Tasks:    28/30
+┌────────────────────────────────────────────────────────────────── Help ──────────────────────────────────────────────────────────────────┐
+│ RESOURCE                                      GENERAL                           NAVIGATION                            HOTKEYS            │
+│ <c>             Copy                          <ctrl-a>    Aliases               <j>          Down                                        │
+│ <ctrl-d>        Delete                        <q>         Back                  <k>          Up                                          │
+│ <d>             Describe                      <esc>       Back/Clear            <g>          Goto Top                                    │
+│ <e>             Edit                          <ctrl-u>    Command Clear         <shift-g>    Goto Bottom                                 │
+│ <l>             Logs                          <:cmd>      Command mode          <ctrl-f>     Page Down                                   │
+│ <space>         Mark                          <tab>       Field Next            <ctrl-b>     Page Up                                     │
+│ <ctrl-\>        Mark Clear                    <backtab>   Field Previous        <[>          History Back                                │
+│ <ctrl-space>    Mark Range                    </term>     Filter mode           <]>          History Forward                             │
+│ <r>             Restart                       <?>         Help                  <->          Last Used Command                           │
+│ <b>             Rollback                      <:q>        Quit                                                                           │
+│ <ctrl-s>        Save                          <ctrl-r>    Reload                                                                         │
+│ <s>             Scale                         <ctrl-g>    Toggle Crumbs                                                                  │
+│ <shift-right>   Select Next Column            <ctrl-e>    Toggle Header                                                                  │
+│ <shift-left>    Select Previous Column                                                                                                   │
+│ <shift-a>       Sort Age                                                                                                                 │
+│ <shift-i>       Sort Image                                                                                                               │
+│ <shift-m>       Sort Mode                                                                                                                │
+│ <shift-n>       Sort Name                                                                                                                │
+│ <shift-p>       Sort Ports                                                                                                               │
+│ <shift-r>       Sort Replicas                                                                                                            │
+│ <shift-o>       Sort Selected Column                                                                                                     │
+│ <shift-s>       Sort Stack                                                                                                               │
+│ <shift-u>       Sort Update                                                                                                              │
+│ <enter>         Tasks                                                                                                                    │
+│ <ctrl-z>        Toggle Faults                                                                                                            │
+│ <ctrl-w>        Toggle Wide                                                                                                              │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  <services>   <help>
+                                                          😎  Viewing services...

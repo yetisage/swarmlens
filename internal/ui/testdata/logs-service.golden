@@ -1,0 +1,24 @@
+Context:  demo [RW]               <0> Tail   <c>      Copy                <w> Toggle Wrap                                  __    __
+Swarm:    acme-prod (6/7 ready)   <1> 1m     <f>      FullScreen                                                          /  \__/  \  swarm
+Node:     manager-1 (leader)      <2> 5m     <?>      Help                                                                \__/  \__/  lens
+SL Rev:   test                    <3> 15m    <ctrl-s> Save                                                                /  \__/  \
+Docker:   29.8.2                  <4> 30m    <s>      Toggle AutoScroll                                                   \__/  \__/
+Services: 12/14                   <5> 1h     <t>      Toggle Timestamp
+Tasks:    28/30
+┌──────────────────────────────────────────────────────── logs(shop_web)[tail 100] ────────────────────────────────────────────────────────┐
+│ Autoscroll:On     FullScreen:Off     Timestamps:Off     Wrap:Off                                                                         │
+│ shop_web.2 10.0.1.166 - - [08/Nov/2026:14:59:49 +0000] "GET / HTTP/1.1" 200 6517 "-" "Mozilla/5.0"                                       │
+│ shop_web.1 10.0.1.88 - - [08/Nov/2026:14:59:50 +0000] "GET /static/app.css HTTP/1.1" 304 4646 "-" "Mozilla/5.0"                          │
+│ shop_web.2 10.0.1.136 - - [08/Nov/2026:14:59:51 +0000] "GET /api/cart HTTP/1.1" 404 1450 "-" "Mozilla/5.0"                               │
+│ shop_web.2 10.0.1.157 - - [08/Nov/2026:14:59:51 +0000] "GET /api/products/42 HTTP/1.1" 304 5526 "-" "Mozilla/5.0"                        │
+│ shop_web.4 10.0.1.182 - - [08/Nov/2026:14:59:52 +0000] "GET /healthz HTTP/1.1" 200 231 "-" "Mozilla/5.0"                                 │
+│ shop_web.1 10.0.1.183 - - [08/Nov/2026:14:59:53 +0000] "GET /favicon.ico HTTP/1.1" 200 8524 "-" "Mozilla/5.0"                            │
+│ shop_web.3 10.0.1.97 - - [08/Nov/2026:14:59:54 +0000] "GET /api/cart HTTP/1.1" 500 7636 "-" "Mozilla/5.0"                                │
+│ shop_web.1 10.0.1.185 - - [08/Nov/2026:14:59:55 +0000] "GET / HTTP/1.1" 304 2127 "-" "Mozilla/5.0"                                       │
+│ shop_web.1 10.0.1.154 - - [08/Nov/2026:14:59:56 +0000] "GET /static/app.js HTTP/1.1" 200 4573 "-" "Mozilla/5.0"                          │
+│ shop_web.3 10.0.1.165 - - [08/Nov/2026:14:59:57 +0000] "GET /api/cart HTTP/1.1" 200 4406 "-" "Mozilla/5.0"                               │
+│ shop_web.2 10.0.1.94 - - [08/Nov/2026:14:59:58 +0000] "GET /static/app.css HTTP/1.1" 200 2965 "-" "Mozilla/5.0"                          │
+│ shop_web.3 10.0.1.186 - - [08/Nov/2026:14:59:59 +0000] "GET /api/orders?limit=20 HTTP/1.1" 200 1297 "-" "Mozilla/5.0"                    │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  <services>   <logs>
+                                                          😎  Viewing services...

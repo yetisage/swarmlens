@@ -1,0 +1,24 @@
+Context:  demo [RW]               <0>      all          <e> Edit       <enter> Tasks                                       __    __
+Swarm:    acme-prod (6/7 ready)   <1>      ci           <?> Help       <y>     YAML                                       /  \__/  \  swarm
+Node:     manager-1 (leader)      <2>      monitoring   <l> Logs                                                          \__/  \__/  lens
+SL Rev:   test                    <3>      shop         <r> Restart                                                       /  \__/  \
+Docker:   29.8.2                  <ctrl-d> Delete       <b> Rollback                                                      \__/  \__/
+Services: 12/14                   <d>      Describe     <s> Scale
+Tasks:    28/30
+┌──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│ 🐳> node                                                                                                                                 │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────── services(all)[14] ────────────────────────────────────────────────────────────┐
+│ STACK       NAME↑                     MODE             REPLICAS  IMAGE                        PORTS                       UPDATE     AGE │
+│ ci          ci_backup                 replicated-job  0/1 (1/1)  acme/backup:3.2                                                      9h │
+│ ci          ci_legacy                 replicated            0/0  acme/legacy-ci:1.0                                                 300d │
+│ ci          ci_runner                 replicated            2/3  gitlab/gitlab-runner:v17.5…                              updating   19d │
+│ monitoring  monitoring_cadvisor       global                5/5  gcr.io/cadvisor/cadvisor:v…                                         77d │
+│ monitoring  monitoring_grafana        replicated            1/1  grafana/grafana:11.2.0       *:3000->3000/tcp                       77d │
+│ monitoring  monitoring_node-exporter  global                5/5  quay.io/prometheus/node-ex…                                         77d │
+│ monitoring  monitoring_prometheus     replicated            1/1  prom/prometheus:v2.54.1      *:9090->9090/tcp                       77d │
+│             registry                  replicated            1/1  registry:2                   *:5000->5000/tcp                      200d │
+│ shop        shop_api                  replicated            3/3  ghcr.io/acme/shop-api:2.4.1                                         41d │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  <services>
+                                                          😎  Viewing services...

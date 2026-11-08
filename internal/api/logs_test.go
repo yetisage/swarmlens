@@ -1,8 +1,16 @@
 package api
 
 import (
+	"bytes"
+	"context"
 	"encoding/binary"
+	"net/http"
+	"strconv"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/docker/docker/api/types/swarm"
 )
 
 // frame builds a multiplexed log frame the way the engine does.
@@ -14,43 +22,154 @@ func frame(stream byte, payload string) []byte {
 	return b
 }
 
-func TestDemuxLogsPlainText(t *testing.T) {
-	// No TTY: the payload arrives raw.
-	got := DemuxLogs([]byte("hello\nworld\n"))
-	if got != "hello\nworld\n" {
-		t.Fatalf("got %q, want %q", got, "hello\nworld\n")
-	}
+type got struct {
+	stderr bool
+	line   string
 }
 
-func TestDemuxLogsMultiplexed(t *testing.T) {
+func collect(t *testing.T, data []byte) []got {
+	t.Helper()
+	var out []got
+	if err := readLogLines(bytes.NewReader(data), func(stderr bool, line string) { out = append(out, got{stderr, line}) }); err != nil {
+		t.Fatalf("readLogLines: %v", err)
+	}
+	return out
+}
+
+func TestReadLogLinesMultiplexed(t *testing.T) {
 	var data []byte
 	data = append(data, frame(1, "stdout line\n")...)
 	data = append(data, frame(2, "stderr line\n")...)
 	data = append(data, frame(1, "second stdout\n")...)
 
-	got := DemuxLogs(data)
-	want := "stdout line\nstderr line\nsecond stdout\n"
-	if got != want {
-		t.Fatalf("got %q, want %q", got, want)
+	lines := collect(t, data)
+	want := []got{{false, "stdout line"}, {true, "stderr line"}, {false, "second stdout"}}
+	if len(lines) != len(want) {
+		t.Fatalf("lines = %+v", lines)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Errorf("line %d = %+v, want %+v", i, lines[i], want[i])
+		}
 	}
 }
 
-func TestDemuxLogsTruncatedFrame(t *testing.T) {
-	// A frame header claiming more bytes than are present must not panic
-	// and must not lose data.
-	data := frame(1, "hello")
-	data = data[:len(data)-2]
-	got := DemuxLogs(data)
-	if got == "" {
-		t.Fatal("expected partial payload to be preserved")
+// A long line can arrive split over several frames, and a frame can hold
+// several lines: lines must be reassembled per stream.
+func TestReadLogLinesReassemblesAcrossFrames(t *testing.T) {
+	var data []byte
+	data = append(data, frame(1, "hel")...)
+	data = append(data, frame(2, "err\n")...)
+	data = append(data, frame(1, "lo\nsecond\nthi")...)
+	data = append(data, frame(1, "rd")...) // unterminated: flushed at EOF
+
+	lines := collect(t, data)
+	want := []got{{true, "err"}, {false, "hello"}, {false, "second"}, {false, "third"}}
+	if len(lines) != len(want) {
+		t.Fatalf("lines = %+v", lines)
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Errorf("line %d = %+v, want %+v", i, lines[i], want[i])
+		}
 	}
 }
 
-func TestDemuxLogsShortInput(t *testing.T) {
-	if got := DemuxLogs([]byte{1, 2}); got != "\x01\x02" {
-		t.Fatalf("short input mangled: %q", got)
+// Tasks with a TTY stream plain text with no framing.
+func TestReadLogLinesRawTTY(t *testing.T) {
+	lines := collect(t, []byte("first\r\nsecond\n"))
+	if len(lines) != 2 || lines[0].line != "first" || lines[1].line != "second" {
+		t.Fatalf("lines = %+v", lines)
 	}
-	if got := DemuxLogs(nil); got != "" {
-		t.Fatalf("nil input should be empty, got %q", got)
+}
+
+func TestReadLogLinesEmptyAndTruncated(t *testing.T) {
+	if lines := collect(t, nil); len(lines) != 0 {
+		t.Fatalf("empty stream gave %+v", lines)
+	}
+	data := frame(1, "hello world\n")
+	if lines := collect(t, data[:len(data)-4]); len(lines) != 0 {
+		t.Fatalf("a truncated frame must not produce a line, got %+v", lines)
+	}
+}
+
+func TestReadLogLinesRejectsCorruptHeader(t *testing.T) {
+	bad := []byte{1, 0, 0, 0, 0xff, 0xff, 0xff, 0xff}
+	if err := readLogLines(bytes.NewReader(bad), func(bool, string) {}); err == nil {
+		t.Fatal("an absurd frame size must be reported")
+	}
+}
+
+func TestParseLogLine(t *testing.T) {
+	raw := "2026-11-08T15:31:03.978897636Z com.docker.swarm.node.id=nid,com.docker.swarm.service.id=sid,com.docker.swarm.task.id=tid hello  world"
+	p := parseLogLine(raw)
+	if p.taskID != "tid" || p.nodeID != "nid" {
+		t.Errorf("ids = %q %q", p.taskID, p.nodeID)
+	}
+	if p.Text != "hello  world" {
+		t.Errorf("text = %q (spacing in the message must survive)", p.Text)
+	}
+	if p.Time.Year() != 2026 || p.Time.Nanosecond() != 978897636 {
+		t.Errorf("time = %v", p.Time)
+	}
+
+	plain := parseLogLine("2026-11-08T15:31:03Z just a message with a=b pair")
+	if plain.taskID != "" || plain.Text != "just a message with a=b pair" {
+		t.Errorf("plain = %+v", plain)
+	}
+	if noTime := parseLogLine("no timestamp here"); noTime.Text != "no timestamp here" {
+		t.Errorf("noTime = %+v", noTime)
+	}
+}
+
+func TestServiceLogsAreAttributedToTasks(t *testing.T) {
+	details := func(task string) string {
+		return "com.docker.swarm.node.id=n1,com.docker.swarm.service.id=svc1,com.docker.swarm.task.id=" + task
+	}
+	a := newTestAPI(t, route(t, map[string]http.HandlerFunc{
+		"/services/svc1/logs": func(w http.ResponseWriter, r *http.Request) {
+			q := r.URL.Query()
+			if q.Get("details") != "1" || q.Get("timestamps") != "1" || q.Get("tail") != "50" {
+				t.Errorf("unexpected log query %v", q)
+			}
+			// The client turns the duration into an absolute timestamp.
+			since, err := strconv.ParseInt(q.Get("since"), 10, 64)
+			if age := time.Now().Unix() - since; err != nil || age < 295 || age > 305 {
+				t.Errorf("since = %q (age %ds), want about 5 minutes ago", q.Get("since"), age)
+			}
+			var buf bytes.Buffer
+			buf.Write(frame(1, "2026-11-08T15:00:01Z "+details("t1")+" from one\n"))
+			buf.Write(frame(2, "2026-11-08T15:00:02Z "+details("t2")+" from two\n"))
+			_, _ = w.Write(buf.Bytes())
+		},
+		"/tasks": func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, []swarm.Task{
+				{ID: "t1", ServiceID: "svc1", Slot: 1, NodeID: "n1"},
+				{ID: "t2", ServiceID: "svc1", Slot: 2, NodeID: "n1"},
+			})
+		},
+		"/services": func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, []swarm.Service{{ID: "svc1", Spec: swarm.ServiceSpec{Annotations: swarm.Annotations{Name: "web"}}}})
+		},
+		"/nodes": func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, []swarm.Node{{ID: "n1", Description: swarm.NodeDescription{Hostname: "worker-1"}}})
+		},
+	}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	var all []LogLine
+	err := a.Logs(ctx, LogTarget{Kind: KindService, ID: "svc1", Name: "web"}, LogOptions{Tail: 50, Since: 5 * time.Minute}, func(b []LogLine) { all = append(all, b...) })
+	if err != nil {
+		t.Fatalf("Logs: %v", err)
+	}
+	if len(all) != 2 {
+		t.Fatalf("lines = %+v", all)
+	}
+	if all[0].Source != "web.1" || all[0].Node != "worker-1" || all[0].Text != "from one" || all[0].Stderr {
+		t.Errorf("line 0 = %+v", all[0])
+	}
+	if all[1].Source != "web.2" || !all[1].Stderr || !strings.HasPrefix(all[1].Time.Format(time.RFC3339), "2026-11-08T15:00:02") {
+		t.Errorf("line 1 = %+v", all[1])
 	}
 }

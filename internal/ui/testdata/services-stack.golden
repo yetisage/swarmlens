@@ -1,0 +1,24 @@
+Context:  demo [RW]               <0>      all          <e> Edit       <enter> Tasks                                       __    __
+Swarm:    acme-prod (6/7 ready)   <1>      shop         <?> Help       <y>     YAML                                       /  \__/  \  swarm
+Node:     manager-1 (leader)      <2>      ci           <l> Logs                                                          \__/  \__/  lens
+SL Rev:   test                    <3>      monitoring   <r> Restart                                                       /  \__/  \
+Docker:   29.8.2                  <ctrl-d> Delete       <b> Rollback                                                      \__/  \__/
+Services: 12/14                   <d>      Describe     <s> Scale
+Tasks:    28/30
+┌─────────────────────────────────────────────────────────── services(shop)[5] ────────────────────────────────────────────────────────────┐
+│ NAME↑              MODE                     REPLICAS  IMAGE                                 PORTS                UPDATE              AGE │
+│ shop_api           replicated                    3/3  ghcr.io/acme/shop-api:2.4.1                                                    41d │
+│ shop_cache         replicated                    1/1  redis:7.4-alpine                                                              120d │
+│ shop_db            replicated                    1/1  postgres:16.4                                                                 120d │
+│ shop_web           replicated                    4/4  nginx:1.27-alpine                     *:8080->80/tcp                           41d │
+│ shop_worker        replicated                    1/2  ghcr.io/acme/shop-worker:2.4.1                                                 41d │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  <services>
+                                                   😎  Viewing services in stack shop...

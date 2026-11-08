@@ -1,137 +1,209 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
+	"time"
 
+	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/swarm"
 )
 
-// Convenience aliases so callers do not need to import the swarm package.
-type (
-	NodeAvailability = swarm.NodeAvailability
-	NodeRole         = swarm.NodeRole
-)
-
-// ActionResult describes the outcome of a mutating operation.
-type ActionResult struct {
-	Message string
-	Err     error
-}
-
-// ScaleService adjusts the desired replica count of a replicated service by
-// delta and returns the new desired count. Only the replica field is
-// changed; the rest of the spec is round-tripped untouched.
-func (a *API) ScaleService(ctx context.Context, name string, delta int) (int, error) {
-	svc, err := a.inspectService(ctx, name)
-	if err != nil {
-		return 0, err
-	}
-	if svc.Spec.Mode.Replicated == nil || svc.Spec.Mode.Replicated.Replicas == nil {
-		return 0, fmt.Errorf("service %q is not replicated (use global mode for per-node counts)", name)
-	}
-	desired := int64(*svc.Spec.Mode.Replicated.Replicas) + int64(delta)
-	if desired < 0 {
-		desired = 0
-	}
-	replicas := uint64(desired)
-	svc.Spec.Mode.Replicated.Replicas = &replicas
-	if _, err := a.cli.ServiceUpdate(ctx, svc.ID, svc.Version, svc.Spec, swarm.ServiceUpdateOptions{}); err != nil {
-		return 0, err
-	}
-	return int(desired), nil
-}
-
-// SetReplicas sets an absolute desired replica count for a replicated service.
-func (a *API) SetReplicas(ctx context.Context, name string, n int) error {
-	svc, err := a.inspectService(ctx, name)
+// ScaleService implements Backend. Only the replica count changes; the rest
+// of the spec is round-tripped untouched.
+func (a *API) ScaleService(ctx context.Context, id string, replicas int) error {
+	svc, _, err := a.cli.ServiceInspectWithRaw(ctx, id, swarm.ServiceInspectOptions{})
 	if err != nil {
 		return err
 	}
 	if svc.Spec.Mode.Replicated == nil {
-		return fmt.Errorf("service %q is not replicated", name)
+		return fmt.Errorf("service %q is not replicated", svc.Spec.Name)
 	}
-	if n < 0 {
-		n = 0
+	if replicas < 0 {
+		replicas = 0
 	}
-	replicas := uint64(n)
-	svc.Spec.Mode.Replicated.Replicas = &replicas
+	n := uint64(replicas)
+	svc.Spec.Mode.Replicated.Replicas = &n
 	_, err = a.cli.ServiceUpdate(ctx, svc.ID, svc.Version, svc.Spec, swarm.ServiceUpdateOptions{})
 	return err
 }
 
-// ForceUpdate triggers a rolling update of every task of a service by
-// bumping the spec's ForceUpdate counter.
-func (a *API) ForceUpdate(ctx context.Context, name string) error {
-	svc, err := a.inspectService(ctx, name)
+// RestartService implements Backend: a forced rolling update of every task,
+// like `docker service update --force`.
+func (a *API) RestartService(ctx context.Context, id string) error {
+	svc, _, err := a.cli.ServiceInspectWithRaw(ctx, id, swarm.ServiceInspectOptions{})
 	if err != nil {
 		return err
 	}
-	svc.Spec.TaskTemplate.ForceUpdate = svc.Spec.TaskTemplate.ForceUpdate + 1
+	svc.Spec.TaskTemplate.ForceUpdate++
 	_, err = a.cli.ServiceUpdate(ctx, svc.ID, svc.Version, svc.Spec, swarm.ServiceUpdateOptions{})
 	return err
 }
 
-// Rollback restores a service to its previous spec.
-func (a *API) Rollback(ctx context.Context, name string) error {
-	svc, err := a.inspectService(ctx, name)
+// RollbackService implements Backend, like `docker service rollback`: the
+// engine swaps in the previous spec using the rollback configuration.
+func (a *API) RollbackService(ctx context.Context, id string) error {
+	svc, _, err := a.cli.ServiceInspectWithRaw(ctx, id, swarm.ServiceInspectOptions{})
 	if err != nil {
 		return err
 	}
 	if svc.PreviousSpec == nil {
-		return fmt.Errorf("service %q has no previous spec to roll back to", name)
+		return fmt.Errorf("service %q has no previous spec to roll back to", svc.Spec.Name)
 	}
-	prev := *svc.PreviousSpec
-	_, err = a.cli.ServiceUpdate(ctx, svc.ID, svc.Version, prev, swarm.ServiceUpdateOptions{})
+	_, err = a.cli.ServiceUpdate(ctx, svc.ID, svc.Version, svc.Spec, swarm.ServiceUpdateOptions{Rollback: "previous"})
 	return err
 }
 
-// RemoveService removes a service and its tasks.
-func (a *API) RemoveService(ctx context.Context, name string) error {
-	svc, err := a.inspectService(ctx, name)
+// SetNodeAvailability implements Backend.
+func (a *API) SetNodeAvailability(ctx context.Context, id string, avail NodeAvailability) error {
+	node, _, err := a.cli.NodeInspectWithRaw(ctx, id)
 	if err != nil {
 		return err
 	}
-	return a.cli.ServiceRemove(ctx, svc.ID)
-}
-
-// SetNodeAvailability drains or activates a node.
-func (a *API) SetNodeAvailability(ctx context.Context, nodeID string, avail swarm.NodeAvailability) error {
-	node, _, err := a.cli.NodeInspectWithRaw(ctx, nodeID)
-	if err != nil {
-		return err
-	}
-	node.Spec.Availability = avail
+	node.Spec.Availability = swarm.NodeAvailability(avail)
 	return a.cli.NodeUpdate(ctx, node.ID, node.Version, node.Spec)
 }
 
-// SetNodeRole promotes or demotes a node between manager and worker.
-func (a *API) SetNodeRole(ctx context.Context, nodeID string, role swarm.NodeRole) error {
-	node, _, err := a.cli.NodeInspectWithRaw(ctx, nodeID)
+// SetNodeRole implements Backend.
+func (a *API) SetNodeRole(ctx context.Context, id string, role NodeRole) error {
+	node, _, err := a.cli.NodeInspectWithRaw(ctx, id)
 	if err != nil {
 		return err
 	}
-	node.Spec.Role = role
+	node.Spec.Role = swarm.NodeRole(role)
 	return a.cli.NodeUpdate(ctx, node.ID, node.Version, node.Spec)
 }
 
-// RemoveNode removes a node from the swarm (force detaches it).
-func (a *API) RemoveNode(ctx context.Context, nodeID string) error {
-	return a.cli.NodeRemove(ctx, nodeID, swarm.NodeRemoveOptions{Force: true})
+// Remove implements Backend.
+func (a *API) Remove(ctx context.Context, kind Kind, id string) error {
+	switch kind {
+	case KindService:
+		return a.cli.ServiceRemove(ctx, id)
+	case KindNode:
+		return a.cli.NodeRemove(ctx, id, swarm.NodeRemoveOptions{Force: true})
+	case KindNetwork:
+		return a.cli.NetworkRemove(ctx, id)
+	case KindVolume:
+		return a.cli.VolumeRemove(ctx, id, false)
+	case KindSecret:
+		return a.cli.SecretRemove(ctx, id)
+	case KindConfig:
+		return a.cli.ConfigRemove(ctx, id)
+	case KindStack:
+		return a.RemoveStack(ctx, id)
+	}
+	return fmt.Errorf("cannot remove a %s", kind)
 }
 
-// RemoveVolume deletes an engine volume.
-func (a *API) RemoveVolume(ctx context.Context, name string, force bool) error {
-	return a.cli.VolumeRemove(ctx, name, force)
+// RemoveStack implements Backend, like `docker stack rm`: the stack's
+// services go first, then its networks, secrets and configs. Volumes are
+// kept. Networks stay busy until the tasks have stopped, so they are
+// retried for a few seconds.
+func (a *API) RemoveStack(ctx context.Context, name string) error {
+	f := filters.NewArgs(filters.Arg("label", StackLabel+"="+name))
+
+	svcs, err := a.cli.ServiceList(ctx, swarm.ServiceListOptions{Filters: f})
+	if err != nil {
+		return err
+	}
+	nets, err := a.cli.NetworkList(ctx, network.ListOptions{Filters: f})
+	if err != nil {
+		return err
+	}
+	secrets, _ := a.cli.SecretList(ctx, swarm.SecretListOptions{Filters: f})
+	configs, _ := a.cli.ConfigList(ctx, swarm.ConfigListOptions{Filters: f})
+	if len(svcs)+len(nets)+len(secrets)+len(configs) == 0 {
+		return fmt.Errorf("stack %q not found", name)
+	}
+
+	var errs []error
+	for _, s := range svcs {
+		if err := a.cli.ServiceRemove(ctx, s.ID); err != nil {
+			errs = append(errs, fmt.Errorf("service %s: %w", s.Spec.Name, err))
+		}
+	}
+	pending := nets
+	deadline := time.Now().Add(10 * time.Second)
+	for len(pending) > 0 {
+		var busy []string
+		var left []network.Summary
+		var lastErr error
+		for _, n := range pending {
+			if err := a.cli.NetworkRemove(ctx, n.ID); err != nil {
+				left = append(left, n)
+				busy = append(busy, n.Name)
+				lastErr = err
+			}
+		}
+		pending = left
+		if len(pending) == 0 {
+			break
+		}
+		if time.Now().After(deadline) || ctx.Err() != nil {
+			errs = append(errs, fmt.Errorf("network %s: %w", strings.Join(busy, ", "), lastErr))
+			break
+		}
+		select {
+		case <-ctx.Done():
+		case <-time.After(500 * time.Millisecond):
+		}
+	}
+	for _, s := range secrets {
+		if err := a.cli.SecretRemove(ctx, s.ID); err != nil {
+			errs = append(errs, fmt.Errorf("secret %s: %w", s.Spec.Name, err))
+		}
+	}
+	for _, c := range configs {
+		if err := a.cli.ConfigRemove(ctx, c.ID); err != nil {
+			errs = append(errs, fmt.Errorf("config %s: %w", c.Spec.Name, err))
+		}
+	}
+	return errors.Join(errs...)
 }
 
-// RemoveNetwork deletes an engine network.
-func (a *API) RemoveNetwork(ctx context.Context, name string) error {
-	return a.cli.NetworkRemove(ctx, name)
+// ServiceSpec implements Backend: the service spec as YAML plus the version
+// it was read at, so a later update can detect concurrent changes.
+func (a *API) ServiceSpec(ctx context.Context, id string) (string, uint64, error) {
+	_, raw, err := a.cli.ServiceInspectWithRaw(ctx, id, swarm.ServiceInspectOptions{})
+	if err != nil {
+		return "", 0, err
+	}
+	var env struct {
+		Version swarm.Version
+		Spec    json.RawMessage
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return "", 0, err
+	}
+	y, err := JSONToYAML(env.Spec)
+	return y, env.Version.Index, err
 }
 
-// CreateService creates a replicated service. It is used by the smoke test
-// to exercise the mutating paths without touching existing services.
+// UpdateServiceSpec implements Backend. Unknown fields are rejected so a
+// typo in the editor does not silently do nothing.
+func (a *API) UpdateServiceSpec(ctx context.Context, id string, version uint64, yamlText string) error {
+	raw, err := yamlToJSON(yamlText)
+	if err != nil {
+		return fmt.Errorf("invalid YAML: %w", err)
+	}
+	var spec swarm.ServiceSpec
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&spec); err != nil {
+		return fmt.Errorf("invalid service spec: %w", err)
+	}
+	_, err = a.cli.ServiceUpdate(ctx, id, swarm.Version{Index: version}, spec, swarm.ServiceUpdateOptions{})
+	return err
+}
+
+// CreateService creates a replicated service. It is not part of Backend:
+// swarmlens does not deploy anything, this exists for the --smoke-mutate
+// self-test, which needs a throwaway service to scale and remove.
 func (a *API) CreateService(ctx context.Context, name, image string, replicas int) error {
 	n := uint64(replicas)
 	spec := swarm.ServiceSpec{
@@ -139,32 +211,9 @@ func (a *API) CreateService(ctx context.Context, name, image string, replicas in
 			Name:   name,
 			Labels: map[string]string{"swarmlens.managed": "true"},
 		},
-		TaskTemplate: swarm.TaskSpec{
-			ContainerSpec: &swarm.ContainerSpec{Image: image},
-		},
-		Mode: swarm.ServiceMode{
-			Replicated: &swarm.ReplicatedService{Replicas: &n},
-		},
+		TaskTemplate: swarm.TaskSpec{ContainerSpec: &swarm.ContainerSpec{Image: image}},
+		Mode:         swarm.ServiceMode{Replicated: &swarm.ReplicatedService{Replicas: &n}},
 	}
 	_, err := a.cli.ServiceCreate(ctx, spec, swarm.ServiceCreateOptions{})
 	return err
-}
-
-// inspectService resolves a service by name or id.
-func (a *API) inspectService(ctx context.Context, nameOrID string) (swarm.Service, error) {
-	svc, _, err := a.cli.ServiceInspectWithRaw(ctx, nameOrID, swarm.ServiceInspectOptions{})
-	if err == nil {
-		return svc, nil
-	}
-	// Fall back to looking the name up in the service list.
-	svcs, lerr := a.cli.ServiceList(ctx, swarm.ServiceListOptions{})
-	if lerr != nil {
-		return swarm.Service{}, err
-	}
-	for _, s := range svcs {
-		if s.Spec.Name == nameOrID {
-			return s, nil
-		}
-	}
-	return swarm.Service{}, err
 }

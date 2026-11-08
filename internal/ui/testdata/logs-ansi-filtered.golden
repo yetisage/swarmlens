@@ -1,0 +1,24 @@
+Context:  demo [RW]               <0> Tail   <c>      Copy                <w> Toggle Wrap                                  __    __
+Swarm:    acme-prod (6/7 ready)   <1> 1m     <f>      FullScreen                                                          /  \__/  \  swarm
+Node:     manager-1 (leader)      <2> 5m     <?>      Help                                                                \__/  \__/  lens
+SL Rev:   test                    <3> 15m    <ctrl-s> Save                                                                /  \__/  \
+Docker:   29.8.2                  <4> 30m    <s>      Toggle AutoScroll                                                   \__/  \__/
+Services: 12/14                   <5> 1h     <t>      Toggle Timestamp
+Tasks:    28/30
+┌────────────────────────────────────────────────── logs(shop_worker)[tail 100] </ERROR> ──────────────────────────────────────────────────┐
+│ Autoscroll:On     FullScreen:Off     Timestamps:Off     Wrap:Off                                                                         │
+│ shop_worker.1 ERROR job 4344 failed: connection reset by peer                                                                            │
+│ shop_worker.1 ERROR job 4334 failed: connection reset by peer                                                                            │
+│ shop_worker.1 ERROR job 4685 failed: connection reset by peer                                                                            │
+│ shop_worker.1 ERROR job 4588 failed: connection reset by peer                                                                            │
+│ shop_worker.1 ERROR job 4287 failed: connection reset by peer                                                                            │
+│ shop_worker.1 ERROR job 4767 failed: connection reset by peer                                                                            │
+│ shop_worker.1 ERROR job 4021 failed: connection reset by peer                                                                            │
+│ shop_worker.1 ERROR job 4266 failed: connection reset by peer                                                                            │
+│ shop_worker.1 ERROR job 4392 failed: connection reset by peer                                                                            │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  <services>   <logs>
+                                                          😎  Viewing services...

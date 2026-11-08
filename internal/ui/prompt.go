@@ -1,166 +1,200 @@
 package ui
 
 import (
-	"strconv"
+	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 )
 
-// prompt is a small single-value input, the swarmlens equivalent of the
-// dialogs k9s opens for actions such as scaling a deployment.
+type promptMode uint8
+
+const (
+	promptOff promptMode = iota
+	promptCommand
+	promptFilter
+)
+
+// prompt is the bordered input box that opens under the header for ":"
+// commands and "/" filters. Like k9s' it completes inline: the suggestion
+// is shown as dimmed text after the cursor, tab accepts it and the up and
+// down keys cycle through the candidates.
 type prompt struct {
-	active bool
-	title  string
-	input  textinput.Model
-	onDone func(a *app, value string) (tea.Model, tea.Cmd)
+	mode promptMode
+	in   input
+	sugg []string // full candidate texts
+	si   int      // current candidate, -1 for none
 }
 
-func newPrompt() prompt {
-	in := textinput.New()
-	in.Prompt = "> "
-	in.CharLimit = 16
-	return prompt{input: in}
+func (a *app) openPrompt(m promptMode) {
+	a.pr = prompt{mode: m, si: -1}
+	a.suggest()
 }
 
-// ask opens the prompt with an initial value.
-func (p *prompt) ask(title, initial string, onDone func(a *app, value string) (tea.Model, tea.Cmd)) {
-	p.active = true
-	p.title = title
-	p.onDone = onDone
-	p.input.SetValue(initial)
-	p.input.CursorEnd()
-	p.input.Focus()
-}
+func (a *app) closePrompt() { a.pr = prompt{} }
 
-func (p *prompt) close() {
-	p.active = false
-	p.input.Blur()
-	p.input.SetValue("")
-}
-
-// handlePromptKey processes input while the prompt is open.
-func (a *app) handlePromptKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
+func (a *app) promptKey(msg tea.KeyMsg) tea.Cmd {
+	pr := &a.pr
+	k := msg.String()
+	atEnd := pr.in.pos == len(pr.in.r)
+	switch k {
 	case "esc":
-		a.prompt.close()
-		a.setStatus("cancelled")
-		return a, nil
-	case "enter":
-		value := strings.TrimSpace(a.prompt.input.Value())
-		cb := a.prompt.onDone
-		a.prompt.close()
-		if cb != nil {
-			return cb(a, value)
+		if pr.mode == promptFilter {
+			if f, ok := a.view().(filterer); ok {
+				f.setFilter("")
+			}
 		}
-		return a, nil
-	}
-	var cmd tea.Cmd
-	a.prompt.input, cmd = a.prompt.input.Update(msg)
-	return a, cmd
-}
+		a.closePrompt()
+		return nil
 
-// overlayPrompt draws the prompt over the base view.
-func (a *app) overlayPrompt(base string) string {
-	body := titleStyle.Render(a.prompt.title) + "\n" + a.prompt.input.View()
-	box := overlayBox.Width(minInt(a.width-8, 60)).Render(body)
-	return placeOverlay(base, box, a.width, a.height)
-}
-
-// parseCount turns the prompt input into a non-negative number.
-func parseCount(s string) (int, bool) {
-	n, err := strconv.Atoi(strings.TrimSpace(s))
-	if err != nil || n < 0 {
-		return 0, false
-	}
-	return n, true
-}
-
-// confirm is a modal confirmation for destructive actions.
-//
-// Like k9s, the focus starts on "Cancel" and TAB moves it, so a stray
-// ENTER cannot delete anything. The y/n shortcuts are also available.
-type confirm struct {
-	active bool
-	title  string
-	detail string
-	focus  int // 0 = cancel, 1 = confirm
-	onYes  func(a *app) (tea.Model, tea.Cmd)
-	onNo   func(a *app) (tea.Model, tea.Cmd)
-}
-
-// ask opens the confirmation modal.
-func (c *confirm) ask(title, detail string, onYes func(a *app) (tea.Model, tea.Cmd)) {
-	c.active = true
-	c.title = title
-	c.detail = detail
-	c.focus = 0
-	c.onYes = onYes
-	c.onNo = nil
-}
-
-// handleConfirmKey processes input while the confirmation modal is open.
-func (a *app) handleConfirmKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "tab", "right":
-		a.confirm.focus = 1
-		return a, nil
-	case "shift+tab", "left":
-		a.confirm.focus = 0
-		return a, nil
-	case "y", "Y":
-		return a.confirmYes()
-	case "n", "N":
-		return a.confirmNo()
 	case "enter":
-		if a.confirm.focus == 1 {
-			return a.confirmYes()
+		text, mode := strings.TrimSpace(pr.in.String()), pr.mode
+		a.closePrompt()
+		if mode == promptFilter || text == "" {
+			return nil // a filter is already live in the view
 		}
-		return a.confirmNo()
-	case "esc":
-		return a.confirmNo()
+		return a.runCommand(text, true)
+
+	case "tab", "right", "ctrl+f":
+		if pr.mode == promptCommand && (k == "tab" || atEnd) && a.ghost() != "" {
+			pr.in.set(pr.in.String() + a.ghost())
+			a.suggest()
+			return nil
+		}
+		if k == "tab" {
+			return nil
+		}
+
+	case "up", "ctrl+p":
+		a.cycle(-1)
+		return nil
+	case "down", "ctrl+n":
+		a.cycle(1)
+		return nil
 	}
-	return a, nil
+
+	if pr.in.handle(msg) {
+		a.promptChanged()
+	}
+	return nil
 }
 
-func (a *app) confirmYes() (tea.Model, tea.Cmd) {
-	cb := a.confirm.onYes
-	a.confirm.active = false
-	if cb != nil {
-		return cb(a)
+// promptChanged reacts to an edit: filters apply live, commands re-suggest.
+func (a *app) promptChanged() {
+	if a.pr.mode == promptFilter {
+		if f, ok := a.view().(filterer); ok {
+			f.setFilter(a.pr.in.String())
+		}
+		return
 	}
-	return a, nil
+	a.suggest()
 }
 
-func (a *app) confirmNo() (tea.Model, tea.Cmd) {
-	cb := a.confirm.onNo
-	a.confirm.active = false
-	a.setStatus("cancelled")
-	if cb != nil {
-		return cb(a)
+// suggest recomputes the completion candidates for the command prompt.
+func (a *app) suggest() {
+	a.pr.sugg, a.pr.si = nil, -1
+	if a.pr.mode != promptCommand {
+		return
 	}
-	return a, nil
+	text := a.pr.in.String()
+	words := strings.Fields(text)
+	trailing := strings.HasSuffix(text, " ")
+
+	switch {
+	case text == "":
+		// Nothing typed: offer the command history, newest first.
+		seen := map[string]bool{}
+		for i := len(a.hist) - 1; i >= 0 && len(a.pr.sugg) < 10; i-- {
+			if !seen[a.hist[i]] {
+				seen[a.hist[i]] = true
+				a.pr.sugg = append(a.pr.sugg, a.hist[i])
+			}
+		}
+
+	case len(words) == 1 && !trailing:
+		w := strings.ToLower(words[0])
+		for _, c := range a.commandWords() {
+			if c != w && strings.HasPrefix(c, w) {
+				a.pr.sugg = append(a.pr.sugg, c)
+			}
+		}
+		sort.SliceStable(a.pr.sugg, func(i, j int) bool {
+			if len(a.pr.sugg[i]) != len(a.pr.sugg[j]) {
+				return len(a.pr.sugg[i]) < len(a.pr.sugg[j])
+			}
+			return a.pr.sugg[i] < a.pr.sugg[j]
+		})
+
+	case len(words) >= 1:
+		// After a resource: offer stack names.
+		res, ok := a.resolve(strings.ToLower(words[0]))
+		if !ok || !res.scoped {
+			break
+		}
+		head, prefix := strings.Join(words, " "), ""
+		if !trailing {
+			head = strings.Join(words[:len(words)-1], " ")
+			prefix = words[len(words)-1]
+		}
+		if len(words) > 1 || trailing {
+			for _, s := range a.stackNames() {
+				if strings.HasPrefix(s, prefix) && s != prefix {
+					a.pr.sugg = append(a.pr.sugg, head+" "+s)
+				}
+			}
+		}
+	}
+	if len(a.pr.sugg) > 0 {
+		a.pr.si = 0
+	}
 }
 
-// overlayConfirm draws the confirmation modal on top of the base view.
-func (a *app) overlayConfirm(base string) string {
-	cancelBtn := keyStyle.Render("  Cancel  ")
-	confirmBtn := keyStyle.Render("  Delete  ")
-	if a.confirm.focus == 0 {
-		cancelBtn = selectedStyle.Render("▌Cancel ")
-		confirmBtn = dimStyle.Render("  Delete  ")
-	} else {
-		cancelBtn = dimStyle.Render("  Cancel  ")
-		confirmBtn = selectedStyle.Render("▌Delete ")
+// ghost is the part of the current candidate that extends the typed text.
+func (a *app) ghost() string {
+	if a.pr.si < 0 || a.pr.si >= len(a.pr.sugg) {
+		return ""
 	}
-	body := titleStyle.Render(a.confirm.title) + "\n" +
-		dimStyle.Render(a.confirm.detail) + "\n\n" +
-		cancelBtn + "   " + confirmBtn
-	box := overlayBox.Width(minInt(a.width-8, 70)).Render(body)
-	return placeOverlay(base, box, a.width, a.height)
+	cand, text := a.pr.sugg[a.pr.si], a.pr.in.String()
+	if len(cand) >= len(text) && strings.EqualFold(cand[:len(text)], text) {
+		return cand[len(text):]
+	}
+	return ""
 }
 
-// ensure lipgloss stays referenced for style helpers.
-var _ = lipgloss.Width
+func (a *app) cycle(delta int) {
+	n := len(a.pr.sugg)
+	if n == 0 {
+		return
+	}
+	a.pr.si = (a.pr.si + delta + n) % n
+}
+
+func (a *app) promptIcon() string {
+	if a.noIcons {
+		return ""
+	}
+	if a.pr.mode == promptFilter {
+		return "🔍"
+	}
+	return "🐳"
+}
+
+func (a *app) drawPrompt(p painter, r rect) {
+	t := a.th
+	border, mark := t.prompt.borderCmd, ">"
+	if a.pr.mode == promptFilter {
+		border, mark = t.prompt.borderFilter, "/"
+	}
+	p.fill(r, t.base())
+	p.frame(r, t.s(border), nil)
+
+	y := r.y + 1
+	x := r.x + 2
+	fg := t.s(t.prompt.fg)
+	x += p.text(x, y, a.promptIcon()+mark+" ", fg)
+	ghost := ""
+	if a.pr.mode == promptCommand && a.pr.in.pos == len(a.pr.in.r) {
+		ghost = a.ghost()
+	}
+	a.pr.in.draw(p.sub(r.inset(1)), x, y, fg.bold(), fg.bold().reverse(), t.s(t.prompt.suggest), ghost)
+}

@@ -13,12 +13,12 @@ jobs:
 
       - uses: actions/setup-go@v5
         with:
-          go-version: "1.24"
+          go-version-file: go.mod
           cache: true
 
       - name: Check formatting
         run: |
-          unformatted=$(gofmt -l .)
+          unformatted=$(gofmt -l main.go internal)
           if [ -n "$unformatted" ]; then
             echo "these files need gofmt:"
             echo "$unformatted"

@@ -7,7 +7,10 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 export GOPATH ?= $(CURDIR)/.gopath
 export GOCACHE ?= $(CURDIR)/.gocache
 
-.PHONY: all build test vet fmt lint check run render smoke clean tidy install ci
+# gofmt is pointed at our own code: the module cache above lives in the tree.
+SRC := main.go internal
+
+.PHONY: all build test vet fmt lint check run demo render smoke live clean tidy install ci
 
 all: check build
 
@@ -21,7 +24,7 @@ vet: ## run go vet
 	go vet ./...
 
 fmt: ## format the code
-	gofmt -w .
+	gofmt -w $(SRC)
 
 lint: fmt vet ## format and vet
 
@@ -30,14 +33,20 @@ check: vet test ## vet + test
 tidy: ## tidy go.mod / go.sum
 	go mod tidy
 
-run: build ## build and run
+run: build ## build and run against the local daemon
 	./$(BINARY)
 
-render: build ## render one static frame
-	./$(BINARY) --render
+demo: build ## build and run against the in-memory demo swarm
+	./$(BINARY) --demo
 
-smoke: build ## run the non-interactive self-test
+render: build ## print one frame of the demo as text
+	./$(BINARY) --demo --render
+
+smoke: build ## read-only self-test against the local daemon
 	./$(BINARY) --smoke
+
+live: ## read-only API test against the local daemon
+	SWARMLENS_LIVE=1 go test ./internal/api -run Live -v -count=1
 
 install: ## install into GOBIN
 	go install -ldflags '$(LDFLAGS)' .

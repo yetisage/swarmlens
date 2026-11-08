@@ -1,0 +1,24 @@
+Context:  demo [RW]               <0>      all          <?> Help                                                           __    __
+Swarm:    acme-prod (6/7 ready)   <1>      ci           <y> YAML                                                          /  \__/  \  swarm
+Node:     manager-1 (leader)      <2>      monitoring                                                                     \__/  \__/  lens
+SL Rev:   test                    <3>      shop                                                                           /  \__/  \
+Docker:   29.8.2                  <ctrl-d> Delete                                                                         \__/  \__/
+Services: 12/14                   <d>      Describe
+Tasks:    28/30
+┌─────────────────────────────────────────────────────────── networks(all)[10] ────────────────────────────────────────────────────────────┐
+│ STACK             NAME↑                     DRIVER         SCOPE         INTERNAL        ATTACHABLE        SUBNET                    AGE │
+│                   bridge                    bridge         local         false           true              172.17.0.0/16            212d │
+│ ci                ci_default                overlay        swarm         false           false             10.0.5.0/24               19d │
+│                   docker_gwbridge           bridge         local         false           true              172.18.0.0/16            212d │
+│                   host                      host           local         false           true                                       212d │
+│                   ingress                   overlay        swarm         false           false             10.0.0.0/24              212d │
+│ monitoring        monitoring_default        overlay        swarm         false           false             10.0.3.0/24               77d │
+│                   none                      null           local         false           true                                       212d │
+│ shop              shop_backend              overlay        swarm         true            false             10.0.2.0/24               41d │
+│ shop              shop_default              overlay        swarm         false           false             10.0.1.0/24               41d │
+│                   traefik-public            overlay        swarm         false           true              10.0.4.0/24              150d │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  <networks>
+                                                          😎  Viewing networks...

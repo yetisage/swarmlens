@@ -1,0 +1,24 @@
+Context:  demo [RW]               <c>       Cordon     <p>     Promote                                                     __    __
+Swarm:    acme-prod (6/7 ready)   <ctrl-d>  Delete     <enter> Tasks                                                      /  \__/  \  swarm
+Node:     manager-1 (leader)      <shift-d> Demote     <u>     Uncordon                                                   \__/  \__/  lens
+SL Rev:   test                    <d>       Describe   <y>     YAML                                                       /  \__/  \
+Docker:   29.8.2                  <r>       Drain                                                                         \__/  \__/
+Services: 12/14                   <?>       Help
+Tasks:    28/30
+┌───────────────────────────────────────────────────────────── nodes(all)[7] ──────────────────────────────────────────────────────────────┐
+│ NAME↑           STATUS        AVAIL        ROLE          MANAGER         VERSION              TASKS        %CPU/R       %MEM/R       AGE │
+│ manager-1       ready         active       manager       leader          29.8.2                  10           31%           8%      212d │
+│ manager-2       ready         active       manager       reachable       29.8.2                   6           19%           5%      212d │
+│ manager-3       ready         active       manager       reachable       29.8.2                   5           16%           4%      212d │
+│ worker-1        ready         active       worker                        29.8.2                   5            8%           2%      190d │
+│ worker-2        ready         active       worker                        29.8.2                   4            6%           2%      190d │
+│ worker-3        ready         drain        worker                        29.8.2                   0            0%           0%       88d │
+│ worker-4        down          active       worker                        29.8.2                   0            0%           0%       31d │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  <nodes>
+                                                            😎  Viewing nodes...

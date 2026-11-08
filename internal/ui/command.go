@@ -1,237 +1,170 @@
 package ui
 
 import (
-	"errors"
+	"context"
 	"fmt"
 	"sort"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
+
+	"swarmlens/internal/api"
 )
 
-// resourceAlias maps a resource view to the names the command mode answers
-// to. It is the swarmlens equivalent of k9s' alias table.
-type resourceAlias struct {
-	screen  screen
-	kind    string   // singular, e.g. "service"
-	plural  string   // plural, e.g. "services"
-	aliases []string // extra short names
-}
+var (
+	quitWords    = []string{"q", "q!", "qa", "quit", "exit"}
+	helpWords    = []string{"help", "h", "?"}
+	aliasWords   = []string{"alias", "aliases", "a"}
+	contextWords = []string{"ctx", "context", "contexts"}
+)
 
-// aliases is the resource registry.
-var aliases = []resourceAlias{
-	{screen: screenServices, kind: "service", plural: "services", aliases: []string{"svc"}},
-	{screen: screenNodes, kind: "node", plural: "nodes", aliases: []string{"no"}},
-	{screen: screenVolumes, kind: "volume", plural: "volumes", aliases: []string{"vol"}},
-	{screen: screenNetworks, kind: "network", plural: "networks", aliases: []string{"net"}},
-	{screen: screenSecrets, kind: "secret", plural: "secrets", aliases: []string{"sec"}},
-	{screen: screenConfigs, kind: "config", plural: "configs", aliases: []string{"cfg"}},
-}
-
-// names returns every name this alias answers to.
-func (a resourceAlias) names() []string {
-	return append([]string{a.kind, a.plural}, a.aliases...)
-}
-
-// resolveAlias maps a command word to a resource view. Exact matches win;
-// a unique prefix is also accepted, like k9s' short names.
-func resolveAlias(word string) (resourceAlias, bool) {
-	w := strings.ToLower(strings.TrimSpace(word))
-	if w == "" {
-		return resourceAlias{}, false
+func in(word string, set []string) bool {
+	for _, s := range set {
+		if s == word {
+			return true
+		}
 	}
-	for _, a := range aliases {
-		for _, n := range a.names() {
-			if w == n {
-				return a, true
+	return false
+}
+
+// resolve maps a command word to a resource, honouring the user's aliases.
+func (a *app) resolve(word string) (*resource, bool) {
+	if target, ok := a.cfg.Aliases[word]; ok {
+		word = target
+	}
+	for _, r := range resources {
+		for _, n := range r.names() {
+			if n == word {
+				return r, true
 			}
 		}
 	}
-	var match *resourceAlias
-	for i := range aliases {
-		a := &aliases[i]
-		for _, n := range a.names() {
-			if strings.HasPrefix(n, w) {
-				if match != nil {
-					return resourceAlias{}, false // ambiguous
-				}
-				match = a
-				break
-			}
-		}
-	}
-	if match != nil {
-		return *match, true
-	}
-	return resourceAlias{}, false
+	return nil, false
 }
 
-// command is a parsed command line.
-type command struct {
-	resource resourceAlias
-	filter   string
-	inverse  bool
+// commandWords are all the names the prompt completes.
+func (a *app) commandWords() []string {
+	var out []string
+	for _, r := range resources {
+		out = append(out, r.names()...)
+	}
+	for alias := range a.cfg.Aliases {
+		out = append(out, alias)
+	}
+	out = append(out, quitWords...)
+	out = append(out, "help", "alias", "aliases")
+	sort.Strings(out)
+	return out
 }
 
-// parseCommand parses a command line of the form "<resource> [/filter]".
+// runCommand interprets a ":" command line. Like k9s' prompt it navigates:
+// it never changes the swarm.
 //
-// Like k9s, the command mode is for navigation only: it switches resource
-// views and can carry a filter. Actions are bound to keys instead.
-func parseCommand(line string) (command, error) {
+//	services                  switch to a resource
+//	services shop             … in one stack ("all" for every stack)
+//	services shop /web        … filtered
+//	ctx prod                  switch docker context
+func (a *app) runCommand(line string, record bool) tea.Cmd {
 	fields := strings.Fields(line)
 	if len(fields) == 0 {
-		return command{}, errors.New("no command")
+		return nil
 	}
-	res, ok := resolveAlias(fields[0])
+	word := strings.ToLower(fields[0])
+	switch {
+	case in(word, quitWords):
+		return a.quit()
+	case in(word, helpWords):
+		if _, ok := a.view().(*helpView); ok {
+			return nil
+		}
+		return a.push(newHelpView(a))
+	case in(word, aliasWords):
+		if a.view().crumb() == "aliases" {
+			return nil
+		}
+		return a.push(a.aliasView())
+	case in(word, contextWords) && len(fields) > 1:
+		return a.switchContext(fields[1])
+	}
+
+	res, ok := a.resolve(word)
 	if !ok {
-		return command{}, fmt.Errorf("unknown command %q", fields[0])
-	}
-	c := command{resource: res}
-	if len(fields) > 1 {
-		arg := strings.Join(fields[1:], " ")
-		switch {
-		case strings.HasPrefix(arg, "/!"):
-			c.inverse = true
-			c.filter = strings.TrimPrefix(arg, "/!")
-		case strings.HasPrefix(arg, "/"):
-			c.filter = strings.TrimPrefix(arg, "/")
-		default:
-			return command{}, fmt.Errorf("unknown argument %q (use /filter)", arg)
-		}
-	}
-	return c, nil
-}
-
-// commandMode is the ":" prompt.
-//
-// Like k9s it is a command interpreter for navigating between resource
-// views — not a menu of actions — and it uses k9s' fish-style inline
-// suggestions: the completion is shown as ghost text after the cursor,
-// tab accepts it and the arrow keys cycle through the candidates.
-type commandMode struct {
-	active      bool
-	input       textinput.Model
-	suggestions []string
-	suggIndex   int
-	history     []string
-	err         string
-}
-
-func newCommandMode() commandMode {
-	in := textinput.New()
-	in.Prompt = ": "
-	in.Placeholder = "service, node, volume…"
-	in.CharLimit = 64
-	return commandMode{input: in, suggIndex: -1}
-}
-
-func (c *commandMode) open() {
-	c.active = true
-	c.err = ""
-	c.input.SetValue("")
-	c.suggest()
-	c.input.Focus()
-}
-
-func (c *commandMode) close() {
-	c.active = false
-	c.input.Blur()
-	c.suggestions = nil
-	c.suggIndex = -1
-}
-
-// suggest recomputes the inline suggestions for the current text.
-//
-// Like k9s, an empty prompt offers the command history and a non-empty one
-// offers the alias names that extend it.
-func (c *commandMode) suggest() {
-	text := c.input.Value()
-	c.suggestions = nil
-	c.suggIndex = -1
-
-	if text == "" {
-		// The history, most recent first.
-		for i := len(c.history) - 1; i >= 0 && len(c.suggestions) < 10; i-- {
-			c.suggestions = append(c.suggestions, c.history[i])
-		}
-		if len(c.suggestions) > 0 {
-			c.suggIndex = 0
-		}
-		return
+		a.modal = newErrorDialog(fmt.Sprintf("`%s` command not found", fields[0]))
+		return nil
 	}
 
-	word := strings.Fields(text)
-	q := strings.ToLower(word[0])
-	for _, al := range aliases {
-		for _, n := range al.names() {
-			if n != q && strings.HasPrefix(n, q) {
-				c.suggestions = append(c.suggestions, strings.TrimPrefix(n, q))
-				break
+	filter, scope, scopeSet := "", "", false
+	for i, f := range fields[1:] {
+		if strings.HasPrefix(f, "/") {
+			filter = strings.TrimPrefix(strings.Join(fields[1+i:], " "), "/")
+			break
+		}
+		scope, scopeSet = f, true
+		if f == "all" || f == "*" || f == "-" {
+			scope = ""
+		}
+	}
+	if scopeSet && res.scoped {
+		a.applyScope(scope)
+	}
+
+	v := newTableView(a, res, loadQuery{})
+	if filter != "" {
+		v.setFilter(filter)
+	}
+	msg := fmt.Sprintf("Viewing %s", res.key)
+	if res.scoped && a.scope != "" {
+		msg += " in stack " + a.scope
+	}
+	a.flash(flashInfo, msg+"...")
+	if record {
+		a.record(strings.Join(strings.Fields(line), " "))
+	}
+	return a.setRoot(v)
+}
+
+// aliasView lists every command the prompt understands (ctrl-a).
+func (a *app) aliasView() view {
+	res := &resource{
+		key: "aliases", singular: "alias", defSort: 0, defAsc: true,
+		cols: []column{
+			{name: "RESOURCE", hotkey: "R", min: 14},
+			{name: "COMMAND", max: 80},
+		},
+		load: func(context.Context, api.Backend, loadQuery) ([]*row, error) {
+			return a.aliasRows(), nil
+		},
+	}
+	res.actions = func(v *tableView) []action {
+		return []action{act("enter", "Goto", true, func() tea.Cmd {
+			if r := v.selected(); r != nil {
+				return a.runCommand(r.id, true)
 			}
-		}
+			return nil
+		})}
 	}
-	sort.Strings(c.suggestions)
-	if len(c.suggestions) > 0 {
-		c.suggIndex = 0
-	}
+	v := newTableView(a, res, loadQuery{})
+	v.alt = true
+	return v
 }
 
-// ghost returns the suggestion to show after the cursor.
-func (c *commandMode) ghost() string {
-	if c.suggIndex < 0 || c.suggIndex >= len(c.suggestions) {
-		return ""
+func (a *app) aliasRows() []*row {
+	extra := map[string][]string{}
+	for alias, target := range a.cfg.Aliases {
+		extra[target] = append(extra[target], alias)
 	}
-	return c.suggestions[c.suggIndex]
-}
-
-// acceptSuggestion appends the current suggestion to the text, like k9s'
-// tab completion.
-func (c *commandMode) acceptSuggestion() {
-	g := c.ghost()
-	if g == "" {
-		return
+	var rows []*row
+	add := func(name string, words []string) {
+		sort.Strings(words)
+		r := &row{id: words[0], name: name, cells: []string{name, strings.Join(words, " ")}, nums: make([]float64, 2)}
+		rows = append(rows, r)
 	}
-	c.input.SetValue(c.input.Value() + g)
-	c.input.CursorEnd()
-	c.suggest()
-}
-
-// cycleSuggestion moves through the candidates, like k9s' up/down keys.
-func (c *commandMode) cycleSuggestion(delta int) {
-	if len(c.suggestions) == 0 {
-		return
+	for _, r := range resources {
+		words := append(r.names(), extra[r.key]...)
+		add(r.key, words)
 	}
-	if c.suggIndex < 0 {
-		c.suggIndex = 0
-	} else {
-		c.suggIndex += delta
-	}
-	if c.suggIndex < 0 {
-		c.suggIndex = len(c.suggestions) - 1
-	}
-	if c.suggIndex >= len(c.suggestions) {
-		c.suggIndex = 0
-	}
-}
-
-// clear empties the prompt.
-func (c *commandMode) clear() {
-	c.input.SetValue("")
-	c.input.CursorStart()
-	c.suggest()
-}
-
-// pushHistory records an executed command.
-func (c *commandMode) pushHistory(line string) {
-	line = strings.TrimSpace(line)
-	if line == "" {
-		return
-	}
-	if n := len(c.history); n > 0 && c.history[n-1] == line {
-		return
-	}
-	c.history = append(c.history, line)
-	if len(c.history) > 50 {
-		c.history = c.history[len(c.history)-50:]
-	}
+	add("aliases", append([]string(nil), aliasWords...))
+	add("help", append([]string(nil), helpWords...))
+	add("quit", append([]string(nil), quitWords...))
+	return rows
 }

@@ -1,0 +1,20 @@
+Context:  demo [RW]               <0>      all          <e> Edit                   __    __
+Swarm:    acme-prod (6/7 ┌─────────────────── <error> ────────────────────┐       /  \__/  \  swarm
+Node:     manager-1 (lead│                                                │       \__/  \__/  lens
+SL Rev:   test           │          < `nope` command not found >          │       /  \__/  \
+Docker:   29.8.2         │          \                                     │       \__/  \__/
+Services: 12/14          │           \                                    │
+Tasks:    28/30          │            \                                   │
+┌────────────────────────│                        ##        .             │────────────────────────┐
+│ STACK        NAME↑     │                  ## ## ##       ==             │         UPDATE     AGE │
+│ ci           ci_backup │               ## ## ## ##      ===             │p:3.2                9h │
+│ ci           ci_legacy │           /""""""""""""""""\___/ ===           │y-ci:1…            300d │
+│ ci           ci_runner │      ~~~ {~~ ~~~~ ~~~ ~~~~ ~~ ~ /  ===- ~~~    │lab-ru…  updating   19d │
+│ monitoring   monitoring│           \______ o          __/               │visor/…             77d │
+│ monitoring   monitoring│            \    \        __/                   │afana:…             77d │
+│ monitoring   monitoring│              \____\______/                     │omethe…             77d │
+│ monitoring   monitoring│                                                │theus:…             77d │
+│              registry  │                    Dismiss                     │                   200d │
+└────────────────────────│                                                │────────────────────────┘
+  <services>             └────────────────────────────────────────────────┘
+                                      😎  Viewing services...

@@ -3,277 +3,304 @@ package ui
 import (
 	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/atotto/clipboard"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/muesli/termenv"
 
 	"swarmlens/internal/api"
 )
 
-// scaleService adjusts the replica count of the selected service.
-//
-// Like k9s, scaling opens a prompt for the desired count rather than
-// stepping through values: delta of 0 asks for an absolute count.
-func (a *app) scaleService(delta int) (tea.Model, tea.Cmd) {
-	svc := a.currentService()
-	if svc == nil {
-		a.setStatus("no service selected")
-		return a, nil
-	}
-	name := svc.Name
-	current := strconv.Itoa(svc.Desired)
+// ---- shared bindings ----
 
-	a.prompt.ask(
-		fmt.Sprintf("Scale %s", name),
-		current,
-		func(a *app, value string) (tea.Model, tea.Cmd) {
-			n, ok := parseCount(value)
-			if !ok {
-				a.setStatus(fmt.Sprintf("%q is not a valid replica count", value))
-				return a, nil
+// describeAct shows the describe report of the selected object.
+func describeAct(v *tableView, kind api.Kind) action {
+	return act("d", "Describe", true, func() tea.Cmd {
+		r := v.selected()
+		if r == nil {
+			return nil
+		}
+		return v.a.openText("describe", r, func(ctx context.Context) (string, error) {
+			return v.a.be.Describe(ctx, kind, r.id)
+		})
+	})
+}
+
+// yamlAct shows the object as YAML.
+func yamlAct(v *tableView, kind api.Kind) action {
+	return act("y", "YAML", true, func() tea.Cmd {
+		r := v.selected()
+		if r == nil {
+			return nil
+		}
+		return v.a.openText("yaml", r, func(ctx context.Context) (string, error) {
+			return v.a.be.YAML(ctx, kind, r.id)
+		})
+	})
+}
+
+// deleteAct removes the selected (or marked) objects after confirmation.
+func deleteAct(v *tableView, kind api.Kind, noun string) action {
+	return mut("ctrl+d", "Delete", func() tea.Cmd {
+		targets := v.targets()
+		if len(targets) == 0 {
+			return nil
+		}
+		msg := fmt.Sprintf("Delete %s %q?", noun, targets[0].name)
+		done := fmt.Sprintf("Deleted %s %s", noun, targets[0].name)
+		if len(targets) > 1 {
+			msg = fmt.Sprintf("Delete %d %ss?", len(targets), noun)
+			done = fmt.Sprintf("Deleted %d %ss", len(targets), noun)
+		}
+		switch kind {
+		case api.KindStack:
+			msg += "\nThis removes its services, networks, secrets and configs. Volumes are kept."
+		case api.KindNode:
+			msg += "\nThe node is force-removed from the swarm and its tasks are stopped."
+		case api.KindVolume:
+			msg += "\nThe data in the volume is lost."
+		}
+		be := v.a.be
+		return v.a.confirm("Delete", msg, func() tea.Cmd {
+			return v.a.run(done, func(ctx context.Context) error {
+				for _, r := range targets {
+					if err := be.Remove(ctx, kind, r.id); err != nil {
+						return fmt.Errorf("%s: %w", r.name, err)
+					}
+				}
+				return nil
+			})
+		})
+	})
+}
+
+// ---- helpers on the app ----
+
+func (a *app) confirm(title, msg string, onOK func() tea.Cmd) tea.Cmd {
+	a.modal = newConfirm(title, msg, onOK)
+	return nil
+}
+
+// run executes a mutation off the UI thread and reports the outcome.
+func (a *app) run(ok string, fn func(ctx context.Context) error) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		if err := fn(ctx); err != nil {
+			return actionMsg{err: err}
+		}
+		return actionMsg{msg: ok}
+	}
+}
+
+// bulk applies a mutation to the marked rows, or to the selected one,
+// asking first when more than one object is involved.
+func (a *app) bulk(v *tableView, verb, past string, fn func(ctx context.Context, be api.Backend, r *row) error) tea.Cmd {
+	targets := v.targets()
+	if len(targets) == 0 {
+		return nil
+	}
+	be := a.be
+	do := func() tea.Cmd {
+		msg := fmt.Sprintf("%s %s", past, targets[0].name)
+		if len(targets) > 1 {
+			msg = fmt.Sprintf("%s %d %s", past, len(targets), v.res.key)
+		}
+		return a.run(msg, func(ctx context.Context) error {
+			for _, r := range targets {
+				if err := fn(ctx, be, r); err != nil {
+					return fmt.Errorf("%s: %w", r.name, err)
+				}
 			}
-			return a, actionCmd(a, func(ctx context.Context) (string, error) {
-				if err := a.api.SetReplicas(ctx, name, n); err != nil {
-					return "", err
-				}
-				return fmt.Sprintf("scaled %s to %d replicas", name, n), nil
-			})
-		},
-	)
-	return a, nil
+			return nil
+		})
+	}
+	if len(targets) > 1 {
+		return a.confirm(verb, fmt.Sprintf("%s %d %s?", verb, len(targets), v.res.key), do)
+	}
+	return do()
 }
 
-// forceUpdateService triggers a rolling update of the selected service.
-func (a *app) forceUpdateService() (tea.Model, tea.Cmd) {
-	svc := a.currentService()
-	if svc == nil {
-		a.setStatus("no service selected")
-		return a, nil
+// openText pushes a describe or YAML view for a row.
+func (a *app) openText(kind string, r *row, load func(ctx context.Context) (string, error)) tea.Cmd {
+	a.flash(flashInfo, fmt.Sprintf("%s %s...", map[string]string{"describe": "Describing", "yaml": "Viewing YAML of"}[kind], r.name))
+	return a.push(newTextView(a, kind, r.name, load))
+}
+
+func (a *app) pushTasks(q loadQuery, sub string) tea.Cmd {
+	v := newTableView(a, taskRes, q)
+	v.sub = sub
+	return a.push(v)
+}
+
+func (a *app) pushLogs(t api.LogTarget, stack string) tea.Cmd {
+	return a.push(a.newLogView(t, stack))
+}
+
+// openStack drills from a stack into its services, making it the active
+// stack the way entering a namespace does in k9s.
+func (a *app) openStack(name string) tea.Cmd {
+	a.applyScope(name)
+	return a.runCommand("services", true)
+}
+
+// jumpToService opens the services with the owner of a task selected,
+// like k9s' "Jump Owner".
+func (a *app) jumpToService(t api.Task) tea.Cmd {
+	v := newTableView(a, serviceRes, loadQuery{})
+	v.selID = t.ServiceID
+	return a.push(v)
+}
+
+// scaleService asks for a replica count.
+func (a *app) scaleService(s api.Service) tea.Cmd {
+	d := &dialog{
+		title:  "Scale",
+		lines:  []string{fmt.Sprintf("Scale service %q?", s.Name)},
+		fields: []*dlgField{{label: "Replicas:", digits: true}},
 	}
-	name := svc.Name
-	return a, actionCmd(a, func(ctx context.Context) (string, error) {
-		if err := a.api.ForceUpdate(ctx, name); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("forced update of %s", name), nil
+	d.fields[0].in.set(strconv.Itoa(s.Desired))
+	d.buttons = []dlgButton{
+		{label: "OK", run: func() tea.Cmd {
+			n, err := strconv.Atoi(d.value())
+			if err != nil {
+				return a.flashFor(flashErr, fmt.Sprintf("%q is not a valid replica count", d.value()))
+			}
+			return a.run(fmt.Sprintf("Scaled %s to %d", s.Name, n), func(ctx context.Context) error {
+				return a.be.ScaleService(ctx, s.ID, n)
+			})
+		}},
+		{label: "Cancel"},
+	}
+	a.modal = d
+	return nil
+}
+
+// copy puts text on the clipboard: the system one when a helper exists,
+// otherwise the terminal's, via OSC 52.
+func (a *app) copy(text string) {
+	if a.static {
+		return
+	}
+	if err := clipboard.WriteAll(text); err == nil {
+		return
+	}
+	termenv.NewOutput(os.Stdout).Copy(text)
+}
+
+// ---- external programs ----
+
+// shell opens a shell in a task's container. Only containers on the node
+// the daemon belongs to can be reached.
+func (a *app) shell(t api.Task) tea.Cmd {
+	switch {
+	case isSimulated(a.be):
+		a.flash(flashWarn, "Shells are not available in demo mode")
+		return nil
+	case t.ContainerID == "" || t.State != "running":
+		a.flash(flashErr, fmt.Sprintf("Task %s is not running", t.Name))
+		return nil
+	case a.summary != nil && t.NodeID != a.summary.NodeID:
+		a.flash(flashErr, fmt.Sprintf("Task %s runs on node %s; shells only reach tasks on the node you are connected to (%s)", t.Name, t.Node, a.summary.NodeName))
+		return nil
+	}
+	args := a.dockerArgs()
+	args = append(args, "exec", "-it", t.ContainerID, "sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash || exec sh")
+	return tea.ExecProcess(exec.Command("docker", args...), func(err error) tea.Msg {
+		return execDoneMsg{what: "shell", err: err}
 	})
 }
 
-// rollbackService restores the previous spec of the selected service.
-func (a *app) rollbackService() (tea.Model, tea.Cmd) {
-	svc := a.currentService()
-	if svc == nil {
-		a.setStatus("no service selected")
-		return a, nil
+// dockerArgs selects the same daemon for the docker CLI as swarmlens uses.
+func (a *app) dockerArgs() []string {
+	if name := a.be.ContextName(); name != "" && name != "default" {
+		return []string{"--context", name}
 	}
-	if !svc.HasPrev {
-		a.setStatus(fmt.Sprintf("no previous spec for %s", svc.Name))
-		return a, nil
-	}
-	name := svc.Name
-	return a, actionCmd(a, func(ctx context.Context) (string, error) {
-		if err := a.api.Rollback(ctx, name); err != nil {
-			return "", err
+	return nil
+}
+
+type editMsg struct {
+	svc     api.Service
+	path    string
+	orig    string
+	version uint64
+	err     error
+}
+
+type editDoneMsg struct {
+	editMsg
+	err error
+}
+
+// editService opens the service spec in $EDITOR and applies the result,
+// like k9s' edit.
+func (a *app) editService(s api.Service) tea.Cmd {
+	be := a.be
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		y, version, err := be.ServiceSpec(ctx, s.ID)
+		if err != nil {
+			return editMsg{svc: s, err: err}
 		}
-		return fmt.Sprintf("rolled back %s", name), nil
+		f, err := os.CreateTemp("", "swarmlens-"+sanitize(s.Name)+"-*.yaml")
+		if err != nil {
+			return editMsg{svc: s, err: err}
+		}
+		defer f.Close()
+		if _, err := f.WriteString(y); err != nil {
+			return editMsg{svc: s, err: err}
+		}
+		return editMsg{svc: s, path: f.Name(), orig: y, version: version}
+	}
+}
+
+func editorCommand() []string {
+	for _, k := range []string{"SWARMLENS_EDITOR", "EDITOR", "VISUAL"} {
+		if v := strings.Fields(os.Getenv(k)); len(v) > 0 {
+			return v
+		}
+	}
+	return []string{"vi"}
+}
+
+func (a *app) onEdit(m editMsg) tea.Cmd {
+	if m.err != nil {
+		a.flash(flashErr, m.err.Error())
+		return nil
+	}
+	ed := editorCommand()
+	cmd := exec.Command(ed[0], append(ed[1:], m.path)...)
+	return tea.ExecProcess(cmd, func(err error) tea.Msg { return editDoneMsg{editMsg: m, err: err} })
+}
+
+func (a *app) onEditDone(m editDoneMsg) tea.Cmd {
+	defer os.Remove(m.path)
+	if m.err != nil {
+		a.flash(flashErr, "Editor failed: "+m.err.Error())
+		return nil
+	}
+	raw, err := os.ReadFile(m.path)
+	if err != nil {
+		a.flash(flashErr, err.Error())
+		return nil
+	}
+	if string(raw) == m.orig {
+		a.flash(flashWarn, fmt.Sprintf("Edit of %s cancelled: no changes", m.svc.Name))
+		return nil
+	}
+	be := a.be
+	return a.run("Updated "+m.svc.Name, func(ctx context.Context) error {
+		return be.UpdateServiceSpec(ctx, m.svc.ID, m.version, string(raw))
 	})
 }
 
-// removeService asks for confirmation and then removes the service.
-func (a *app) removeService() (tea.Model, tea.Cmd) {
-	svc := a.currentService()
-	if svc == nil {
-		a.setStatus("no service selected")
-		return a, nil
-	}
-	name := svc.Name
-	a.confirm.ask(
-		fmt.Sprintf("Remove service %q?", name),
-		"This deletes the service and all of its tasks.",
-		func(a *app) (tea.Model, tea.Cmd) {
-			return a, actionCmd(a, func(ctx context.Context) (string, error) {
-				if err := a.api.RemoveService(ctx, name); err != nil {
-					return "", err
-				}
-				a.selectedServiceID = ""
-				return fmt.Sprintf("removed service %s", name), nil
-			})
-		},
-	)
-	return a, nil
-}
-
-// setNodeAvailability drains or activates the selected node.
-func (a *app) setNodeAvailability(avail string) (tea.Model, tea.Cmd) {
-	node := a.currentNode()
-	if node == nil {
-		a.setStatus("no node selected")
-		return a, nil
-	}
-	id, host := node.ID, node.Hostname
-	return a, actionCmd(a, func(ctx context.Context) (string, error) {
-		if err := a.api.SetNodeAvailability(ctx, id, api.NodeAvailability(avail)); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("node %s is now %s", host, avail), nil
-	})
-}
-
-// setNodeRole promotes or demotes the selected node.
-func (a *app) setNodeRole(role string) (tea.Model, tea.Cmd) {
-	node := a.currentNode()
-	if node == nil {
-		a.setStatus("no node selected")
-		return a, nil
-	}
-	id, host := node.ID, node.Hostname
-	return a, actionCmd(a, func(ctx context.Context) (string, error) {
-		if err := a.api.SetNodeRole(ctx, id, api.NodeRole(role)); err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("node %s is now a %s", host, role), nil
-	})
-}
-
-// removeNode asks for confirmation and then removes the node.
-func (a *app) removeNode() (tea.Model, tea.Cmd) {
-	node := a.currentNode()
-	if node == nil {
-		a.setStatus("no node selected")
-		return a, nil
-	}
-	id, host := node.ID, node.Hostname
-	a.confirm.ask(
-		fmt.Sprintf("Remove node %q?", host),
-		"The node is force-detached from the swarm. Running tasks are stopped.",
-		func(a *app) (tea.Model, tea.Cmd) {
-			return a, actionCmd(a, func(ctx context.Context) (string, error) {
-				if err := a.api.RemoveNode(ctx, id); err != nil {
-					return "", err
-				}
-				a.selectedNodeID = ""
-				return fmt.Sprintf("removed node %s", host), nil
-			})
-		},
-	)
-	return a, nil
-}
-
-// toggleFollow starts or stops streaming the task logs.
-func (a *app) toggleFollow() (tea.Model, tea.Cmd) {
-	a.follow = !a.follow
-	if a.follow {
-		a.setStatus("following logs (f to stop)")
-		return a, a.startFollow()
-	}
-	a.stopFollow()
-	a.setStatus("log follow stopped")
-	return a, nil
-}
-
-// removeVolume asks for confirmation and then deletes a volume.
-func (a *app) removeVolume() (tea.Model, tea.Cmd) {
-	v := a.currentVolume()
-	if v == nil {
-		a.setStatus("no volume selected")
-		return a, nil
-	}
-	name := v.Name
-	a.confirm.ask(
-		fmt.Sprintf("Remove volume %q?", name),
-		"Data in the volume is lost. The volume must not be in use.",
-		func(a *app) (tea.Model, tea.Cmd) {
-			return a, actionCmd(a, func(ctx context.Context) (string, error) {
-				if err := a.api.RemoveVolume(ctx, name, false); err != nil {
-					return "", err
-				}
-				return fmt.Sprintf("removed volume %s", name), nil
-			})
-		},
-	)
-	return a, nil
-}
-
-// removeNetwork asks for confirmation and then deletes a network.
-func (a *app) removeNetwork() (tea.Model, tea.Cmd) {
-	n := a.currentNetwork()
-	if n == nil {
-		a.setStatus("no network selected")
-		return a, nil
-	}
-	name := n.Name
-	a.confirm.ask(
-		fmt.Sprintf("Remove network %q?", name),
-		"Attached containers are disconnected. Built-in networks cannot be removed.",
-		func(a *app) (tea.Model, tea.Cmd) {
-			return a, actionCmd(a, func(ctx context.Context) (string, error) {
-				if err := a.api.RemoveNetwork(ctx, name); err != nil {
-					return "", err
-				}
-				return fmt.Sprintf("removed network %s", name), nil
-			})
-		},
-	)
-	return a, nil
-}
-
-// removeSecret deletes a swarm secret after checking that no service uses it.
-func (a *app) removeSecret() (tea.Model, tea.Cmd) {
-	idx := a.secrets.Cursor()
-	if idx < 0 || idx >= len(a.secretRows) {
-		a.setStatus("no secret selected")
-		return a, nil
-	}
-	name := a.secretRows[idx].Name
-	a.confirm.ask(
-		fmt.Sprintf("Remove secret %q?", name),
-		"Secret values are never displayed; deleting is permanent.",
-		func(a *app) (tea.Model, tea.Cmd) {
-			return a, actionCmd(a, func(ctx context.Context) (string, error) {
-				used, err := a.api.SecretUsage(ctx, name)
-				if err != nil {
-					return "", err
-				}
-				if len(used) > 0 {
-					return "", fmt.Errorf("secret %q is still used by: %s", name, strings.Join(used, ", "))
-				}
-				if err := a.api.RemoveSecret(ctx, name); err != nil {
-					return "", err
-				}
-				return fmt.Sprintf("removed secret %s", name), nil
-			})
-		},
-	)
-	return a, nil
-}
-
-// removeConfig deletes a swarm config after checking that no service uses it.
-func (a *app) removeConfig() (tea.Model, tea.Cmd) {
-	idx := a.configs.Cursor()
-	if idx < 0 || idx >= len(a.configRows) {
-		a.setStatus("no config selected")
-		return a, nil
-	}
-	name := a.configRows[idx].Name
-	a.confirm.ask(
-		fmt.Sprintf("Remove config %q?", name),
-		"Deleting is permanent.",
-		func(a *app) (tea.Model, tea.Cmd) {
-			return a, actionCmd(a, func(ctx context.Context) (string, error) {
-				used, err := a.api.ConfigUsage(ctx, name)
-				if err != nil {
-					return "", err
-				}
-				if len(used) > 0 {
-					return "", fmt.Errorf("config %q is still used by: %s", name, strings.Join(used, ", "))
-				}
-				if err := a.api.RemoveConfig(ctx, name); err != nil {
-					return "", err
-				}
-				return fmt.Sprintf("removed config %s", name), nil
-			})
-		},
-	)
-	return a, nil
+func isSimulated(be api.Backend) bool {
+	s, ok := be.(api.Simulated)
+	return ok && s.Simulated()
 }

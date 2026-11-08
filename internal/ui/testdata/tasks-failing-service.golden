@@ -1,0 +1,24 @@
+Context:  demo [RW]               <d>       Describe                                                                       __    __
+Swarm:    acme-prod (6/7 ready)   <?>       Help                                                                          /  \__/  \  swarm
+Node:     manager-1 (leader)      <shift-j> Jump Owner                                                                    \__/  \__/  lens
+SL Rev:   test                    <enter>   Logs                                                                          /  \__/  \
+Docker:   29.8.2                  <s>       Shell                                                                         \__/  \__/
+Services: 12/14                   <y>       YAML
+Tasks:    28/30
+┌───────────────────────────────────────────────────────── tasks(shop_worker)[5] ──────────────────────────────────────────────────────────┐
+│ NAME↑             NODE          DESIRED     STATE      IMAGE                             ERROR                                       AGE │
+│ shop_worker.1     manager-1     running     running    ghcr.io/acme/shop-worker:2.4.1                                                13d │
+│ shop_worker.2     manager-2     running     failed     ghcr.io/acme/shop-worker:2.4.1    task: non-zero exit (137): OOM killed       95s │
+│ shop_worker.2     worker-2      shutdown    failed     ghcr.io/acme/shop-worker:2.4.1    task: non-zero exit (137): OOM killed       10m │
+│ shop_worker.2     worker-2      shutdown    failed     ghcr.io/acme/shop-worker:2.4.1    task: non-zero exit (137): OOM killed       17m │
+│ shop_worker.2     worker-2      shutdown    failed     ghcr.io/acme/shop-worker:2.4.1    task: non-zero exit (137): OOM killed       24m │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  <services>   <tasks>
+                                                          😎  Viewing services...

@@ -1,0 +1,24 @@
+Context:  demo [RW]               <ctrl-d> Delete                                                                          __    __
+Swarm:    acme-prod (6/7 ready)   <d>      Describe                                                                       /  \__/  \  swarm
+Node:     manager-1 (leader)      <?>      Help                                                                           \__/  \__/  lens
+SL Rev:   test                    <enter>  Services                                                                       /  \__/  \
+Docker:   29.8.2                  <y>      YAML                                                                           \__/  \__/
+Services: 12/14
+Tasks:    28/30
+┌───────────────────────────────────────────────────────────── stacks(all)[3] ─────────────────────────────────────────────────────────────┐
+│ NAME↑                        SERVICES           TASKS           NETWORKS          VOLUMES          SECRETS          CONFIGS          AGE │
+│ ci                                  3             2/4                  1                0                1                0         300d │
+│ monitoring                          4           12/12                  1                2                0                1          77d │
+│ shop                                5           10/11                  2                1                2                1         120d │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  <stacks>
+                                                           😎  Viewing stacks...

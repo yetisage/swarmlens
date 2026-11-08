@@ -1,0 +1,24 @@
+# A tour of swarmlens in demo mode. Run it with scripts/termshot.py:
+#   termshot.py --cols 140 --rows 38 --out shots scripts/tour.script -- ./swarmlens --demo
+wait 2
+shot 01-services
+type :nodes
+key enter
+wait 0.5
+shot 02-nodes
+type :stacks
+key enter
+wait 0.5
+key enter
+wait 0.5
+shot 03-stack-services
+type d
+wait 0.8
+shot 04-describe
+key esc
+type l
+wait 1.5
+shot 05-logs
+key esc
+type ?
+shot 06-help

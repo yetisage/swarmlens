@@ -1,302 +1,306 @@
 package ui
 
 import (
-	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
-
-	tea "github.com/charmbracelet/bubbletea"
-
-	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 
 	"swarmlens/internal/api"
 )
 
-// withColors enables truecolor rendering for the duration of a test.
-func withColors(t *testing.T) {
+func svcRow(id, name, stack string, running, desired int, age string) *row {
+	r := newRow(serviceRes, id, name)
+	r.stack = stack
+	r.cells[svcStack] = stack
+	r.cells[svcName] = name
+	r.cells[svcMode] = "replicated"
+	r.cells[svcReplicas], r.nums[svcReplicas] = ratioCell(running, desired)
+	r.cells[svcImage] = "nginx"
+	r.cells[svcAge] = age
+	return r
+}
+
+func plainTable(t *testing.T) *tableView {
 	t.Helper()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	lipgloss.SetHasDarkBackground(true)
-	t.Cleanup(func() {
-		lipgloss.SetColorProfile(termenv.Ascii)
-		lipgloss.SetHasDarkBackground(false)
-	})
+	a := newTestApp(t, 140, 38)
+	return newTableView(a, serviceRes, loadQuery{})
 }
 
-// TestTableRowsRenderIdentically is the regression test for the colour
-// leak that made some rows render in the terminal's default colour while
-// others inherited the dim colour of the previous row.
-//
-// The cause was bubbles' table truncating cell values byte-wise, which cut
-// ANSI escape sequences in half. A broken escape leaves the terminal's
-// colour state set, and plain cells inherit it from the previous row.
-func TestTableRowsRenderIdentically(t *testing.T) {
-	withColors(t)
-
-	a := newTestApp()
-	a.screen = screenVolumes
-
-	var rows []api.VolumeRow
-	for i := 0; i < 25; i++ {
-		rows = append(rows, api.VolumeRow{
-			Name:    "volume-" + strings.Repeat("x", 50),
-			Driver:  "local",
-			Scope:   "local",
-			Created: "2025-06-01",
-		})
+// The regression test for the stale selection bug of the first version: a
+// live refresh that reorders rows must keep the same row selected.
+func TestSelectionSurvivesReorder(t *testing.T) {
+	v := plainTable(t)
+	v.applyRows([]*row{svcRow("a", "alpha", "", 1, 1, "1d"), svcRow("b", "beta", "", 1, 1, "1d"), svcRow("c", "gamma", "", 1, 1, "1d")})
+	v.move(1)
+	if v.selected().name != "beta" {
+		t.Fatalf("selected %s, want beta", v.selected().name)
 	}
-	a.volumes.SetRows(volumeTableRows(rows))
-	a.volumes.SetCursor(12)
-	a.resize()
+	// The refresh returns them in another order, and a new row sorts first.
+	v.applyRows([]*row{svcRow("c", "gamma", "", 1, 1, "1d"), svcRow("b", "beta", "", 1, 1, "1d"), svcRow("z", "aardvark", "", 1, 1, "1d"), svcRow("a", "alpha", "", 1, 1, "1d")})
+	if v.selected().name != "beta" {
+		t.Errorf("selection moved to %s after the refresh, want beta", v.selected().name)
+	}
+	if v.cursor != 2 {
+		t.Errorf("cursor = %d, want 2 (aardvark, alpha, beta)", v.cursor)
+	}
+}
 
-	var seen []string
-	for _, line := range strings.Split(a.View(), "\n") {
-		if !strings.Contains(line, "volume-") {
+func TestSelectionFallsBackWhenTheRowDisappears(t *testing.T) {
+	v := plainTable(t)
+	v.applyRows([]*row{svcRow("a", "alpha", "", 1, 1, ""), svcRow("b", "beta", "", 1, 1, "")})
+	v.move(1)
+	v.applyRows([]*row{svcRow("a", "alpha", "", 1, 1, "")})
+	if v.selected() == nil || v.selected().name != "alpha" {
+		t.Fatalf("selected %v, want a fallback to alpha", v.selected())
+	}
+	v.applyRows(nil)
+	if v.selected() != nil || v.selID != "" {
+		t.Error("an empty table has no selection")
+	}
+	v.move(1) // must not panic
+	v.key(keyMsg("G"))
+}
+
+func TestDeltaMarksNewAndChangedRowsOnly(t *testing.T) {
+	v := plainTable(t)
+	first := []*row{svcRow("a", "alpha", "", 1, 1, "1d"), svcRow("b", "beta", "", 1, 2, "1d")}
+	v.applyRows(first)
+	for _, r := range first {
+		if r.delta != roleStd {
+			t.Errorf("%s was highlighted on the first load", r.name)
+		}
+	}
+	second := []*row{
+		svcRow("a", "alpha", "", 1, 1, "2d"), // only the age changed
+		svcRow("b", "beta", "", 2, 2, "1d"),  // replicas changed
+		svcRow("c", "gamma", "", 1, 1, "1d"), // new
+	}
+	v.applyRows(second)
+	if got := [3]role{second[0].delta, second[1].delta, second[2].delta}; got != [3]role{roleStd, roleMod, roleAdd} {
+		t.Errorf("deltas = %v, want [std mod add]: ages must not count as updates", got)
+	}
+	// One refresh later the highlight is gone.
+	third := []*row{svcRow("a", "alpha", "", 1, 1, "2d"), svcRow("b", "beta", "", 2, 2, "1d"), svcRow("c", "gamma", "", 1, 1, "1d")}
+	v.applyRows(third)
+	for _, r := range third {
+		if r.delta != roleStd {
+			t.Errorf("%s is still highlighted", r.name)
+		}
+	}
+}
+
+func TestNumericColumnsSortByValue(t *testing.T) {
+	v := plainTable(t)
+	v.applyRows([]*row{svcRow("a", "a", "", 10, 10, ""), svcRow("b", "b", "", 1, 2, ""), svcRow("c", "c", "", 0, 4, "")})
+	v.sortBy(svcReplicas)
+	if names := rowNames(v); names != "c b a" {
+		t.Errorf("ascending by replica ratio = %s, want c b a", names)
+	}
+	v.sortBy(svcReplicas)
+	if names := rowNames(v); names != "a b c" {
+		t.Errorf("descending = %s, want a b c", names)
+	}
+	// Text columns use natural order: web.2 before web.10.
+	v.applyRows([]*row{svcRow("1", "web.10", "", 1, 1, ""), svcRow("2", "web.2", "", 1, 1, "")})
+	v.sortBy(svcName)
+	if names := rowNames(v); names != "web.2 web.10" {
+		t.Errorf("natural order = %s", names)
+	}
+}
+
+func rowNames(v *tableView) string {
+	var out []string
+	for _, r := range v.rows {
+		out = append(out, r.name)
+	}
+	return strings.Join(out, " ")
+}
+
+func TestScopeFaultsAndFilterCombine(t *testing.T) {
+	v := plainTable(t)
+	bad := svcRow("b", "shop_worker", "shop", 1, 2, "")
+	bad.fault = true
+	v.applyRows([]*row{svcRow("a", "shop_web", "shop", 1, 1, ""), bad, svcRow("c", "ci_runner", "ci", 1, 1, "")})
+	v.a.scope = "shop"
+	v.rebuild()
+	if got := rowNames(v); got != "shop_web shop_worker" {
+		t.Errorf("scope shop → %s", got)
+	}
+	v.faults = true
+	v.rebuild()
+	if got := rowNames(v); got != "shop_worker" {
+		t.Errorf("scope + faults → %s", got)
+	}
+	v.faults = false
+	v.setFilter("web")
+	if got := rowNames(v); got != "shop_web" {
+		t.Errorf("scope + filter → %s", got)
+	}
+	v.setFilter("!web")
+	if got := rowNames(v); got != "shop_worker" {
+		t.Errorf("scope + inverse filter → %s", got)
+	}
+}
+
+func TestMarkRangeAndToggle(t *testing.T) {
+	v := plainTable(t)
+	var rows []*row
+	for _, n := range []string{"a", "b", "c", "d", "e"} {
+		rows = append(rows, svcRow(n, n, "", 1, 1, ""))
+	}
+	v.applyRows(rows)
+	v.toggleMark() // marks a, moves to b
+	v.cursor = 3
+	v.syncSel()
+	v.markRange()
+	if len(v.marks) != 4 {
+		t.Errorf("range marked %d rows, want 4 (a-d)", len(v.marks))
+	}
+	if got := len(v.targets()); got != 4 {
+		t.Errorf("targets = %d, want the 4 marked rows", got)
+	}
+	v.marks = map[string]bool{}
+	if got := v.targets(); len(got) != 1 || got[0].name != "d" {
+		t.Errorf("with no marks the target is the selected row, got %v", got)
+	}
+	// Marks of rows that vanish are dropped.
+	v.marks["z"] = true
+	v.rebuild()
+	if v.marks["z"] {
+		t.Error("a mark for a row that no longer exists survived")
+	}
+}
+
+func TestEmptyStackColumnIsHidden(t *testing.T) {
+	v := plainTable(t)
+	v.applyRows([]*row{svcRow("a", "alpha", "", 1, 1, "")})
+	for _, i := range v.visibleCols() {
+		if v.res.cols[i].name == "STACK" {
+			t.Error("the STACK column must disappear when no service belongs to a stack")
+		}
+	}
+	v.applyRows([]*row{svcRow("a", "alpha", "shop", 1, 1, "")})
+	found := false
+	for _, i := range v.visibleCols() {
+		found = found || v.res.cols[i].name == "STACK"
+	}
+	if !found {
+		t.Error("the STACK column must show once a stack exists")
+	}
+}
+
+func TestColumnLayoutInvariants(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	for _, res := range resources {
+		if res.key == "events" || res.key == "contexts" {
 			continue
 		}
-		seen = append(seen, line)
-	}
-	if len(seen) < 20 {
-		t.Fatalf("expected the rows to be rendered, got %d", len(seen))
-	}
-
-	// Every row except the selected one must be byte-identical.
-	for i, line := range seen {
-		if i == 12 {
-			continue // selected row carries the highlight background
+		v := newTableView(a, res, loadQuery{})
+		rows, err := res.load(nil, a.be, loadQuery{}) //nolint:staticcheck // the demo ignores the context
+		if err != nil {
+			t.Fatalf("%s: %v", res.key, err)
 		}
-		if line != seen[0] {
-			t.Errorf("row %d renders differently from row 0:\n row 0: %q\n row %d: %q", i, seen[0], i, line)
-		}
-	}
-
-	// The selected row must be distinguishable.
-	if seen[12] == seen[0] {
-		t.Error("the selected row is not visually distinguishable")
-	}
-}
-
-// TestTableDoesNotTruncateStyledCells makes sure a styled cell keeps its
-// escape sequences and its full text.
-func TestTableDoesNotTruncateStyledCells(t *testing.T) {
-	withColors(t)
-
-	styled := dimStyle.Render("2025-06-01")
-	got := fitStyled(dimStyle, "2025-06-01", 26)
-	if !strings.Contains(got, "2025-06-01") {
-		t.Errorf("styled cell lost text: %q", got)
-	}
-	if !strings.Contains(got, "\x1b[") {
-		t.Errorf("styled cell lost its escape sequences: %q", got)
-	}
-	if lipgloss.Width(got) != 26 {
-		t.Errorf("styled cell width = %d, want 26", lipgloss.Width(got))
-	}
-	_ = styled
-}
-
-// TestTableTruncatesLongTextWithEllipsis checks the visible behaviour for
-// content that does not fit.
-func TestTableTruncatesLongTextWithEllipsis(t *testing.T) {
-	withColors(t)
-
-	long := strings.Repeat("a", 100)
-	got := fit(long, 10)
-	if lipgloss.Width(got) != 10 {
-		t.Errorf("width = %d, want 10", lipgloss.Width(got))
-	}
-	if !strings.HasSuffix(strings.TrimSpace(got), "…") {
-		t.Errorf("expected an ellipsis, got %q", got)
-	}
-}
-
-// TestTableEndsCellsWithReset guards against colour state leaking into the
-// next row: every cell must terminate its own styling.
-func TestTableEndsCellsWithReset(t *testing.T) {
-	withColors(t)
-
-	a := newTestApp()
-	a.screen = screenVolumes
-	rows := []api.VolumeRow{
-		{Name: "aaa", Driver: "local", Scope: "local", Created: "2025-06-01"},
-		{Name: "bbb", Driver: "local", Scope: "local", Created: "2025-06-01"},
-	}
-	a.volumes.SetRows(volumeTableRows(rows))
-	a.resize()
-
-	for _, line := range strings.Split(a.View(), "\n") {
-		if !strings.Contains(line, "aaa") && !strings.Contains(line, "bbb") {
-			continue
-		}
-		if !strings.Contains(line, "\x1b[0m") {
-			t.Errorf("row does not end with a reset: %q", line)
-		}
-	}
-}
-
-// TestTableSelectedRowBackground checks that the selected row is
-// highlighted with a background.
-func TestTableSelectedRowBackground(t *testing.T) {
-	withColors(t)
-
-	a := newTestApp()
-	a.screen = screenVolumes
-	rows := []api.VolumeRow{
-		{Name: "aaa", Driver: "local", Scope: "local", Created: "2025-06-01"},
-		{Name: "bbb", Driver: "local", Scope: "local", Created: "2025-06-01"},
-	}
-	a.volumes.SetRows(volumeTableRows(rows))
-	a.volumes.SetCursor(0)
-	a.resize()
-
-	lines := strings.Split(a.View(), "\n")
-	var selected string
-	for _, line := range lines {
-		if strings.Contains(line, "aaa") {
-			selected = line
-		}
-	}
-	if !strings.Contains(selected, "48;2;") {
-		t.Errorf("selected row has no background highlight: %q", selected)
-	}
-}
-
-// TestViewFitsTerminalHeight is the regression test for the layout
-// regression: the table renders a header and a separator in addition to
-// its rows, so the total must still fit the terminal height — otherwise
-// the view scrolls, the status bar disappears and overlays land in the
-// wrong place.
-func TestViewFitsTerminalHeight(t *testing.T) {
-	for _, h := range []int{14, 20, 24, 40} {
-		a := newTestApp()
-		a.width, a.height = 100, h
-		a.screen = screenVolumes
-
-		var rows []api.VolumeRow
-		for i := 0; i < 50; i++ {
-			rows = append(rows, api.VolumeRow{
-				Name:    "volume-" + strings.Repeat("y", 40),
-				Driver:  "local",
-				Scope:   "local",
-				Created: "2025-06-01",
-			})
-		}
-		a.volumes.SetRows(volumeTableRows(rows))
-		a.resize()
-
-		lines := strings.Split(a.View(), "\n")
-		// The view may end with a trailing newline, which renders as an
-		// extra empty line.
-		n := len(lines)
-		if n > 0 && lines[n-1] == "" {
-			n--
-		}
-		if n > h {
-			t.Errorf("view is %d lines tall but the terminal is %d lines", n, h)
-		}
-	}
-}
-
-// TestOverlayIsNotClipped checks that an overlay taller than the base view
-// is rendered in full rather than cut off.
-func TestOverlayIsNotClipped(t *testing.T) {
-	base := strings.Repeat("base line\n", 3)
-	box := overlayBox.Width(20).Render("one\ntwo\nthree\nfour")
-
-	out := placeOverlay(base, box, 60, 12)
-	lines := strings.Split(out, "\n")
-	if len(lines) < 6 {
-		t.Fatalf("overlay was clipped: only %d lines", len(lines))
-	}
-	joined := strings.Join(lines, "\n")
-	for _, want := range []string{"one", "two", "three", "four"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("overlay lost the line %q", want)
-		}
-	}
-}
-
-// TestOverlayFitsShortTerminal checks that an overlay never makes the view
-// taller than the terminal.
-func TestOverlayFitsShortTerminal(t *testing.T) {
-	base := strings.Repeat("base line\n", 4)
-	box := overlayBox.Width(20).Render(strings.Repeat("x\n", 40))
-
-	out := placeOverlay(base, box, 60, 10)
-	lines := strings.Split(out, "\n")
-	if len(lines) > 10 {
-		t.Errorf("overlay made the view %d lines tall in a 10 line terminal", len(lines))
-	}
-}
-
-// TestTruncateVisibleIsExact checks the helper the overlay relies on.
-func TestTruncateVisibleIsExact(t *testing.T) {
-	for _, w := range []int{0, 1, 5, 15, 40} {
-		got := truncateVisible(" 1736c7a1259e3faaa31345c08c877387e", w)
-		if w == 0 {
-			if got != "" {
-				t.Errorf("width 0 should be empty, got %q", got)
+		v.applyRows(rows)
+		for _, wide := range []bool{false, true} {
+			v.wide = wide
+			for avail := 10; avail <= 220; avail += 7 {
+				plans := v.layout(avail)
+				if len(plans) == 0 {
+					t.Errorf("%s: no columns fit %d cells", res.key, avail)
+					continue
+				}
+				end := 0
+				for i, pl := range plans {
+					if pl.w <= 0 {
+						t.Errorf("%s avail=%d: column %d has width %d", res.key, avail, i, pl.w)
+					}
+					if pl.x < end {
+						t.Errorf("%s avail=%d: column %d overlaps its neighbour (x=%d, previous end %d)", res.key, avail, i, pl.x, end)
+					}
+					end = pl.x + pl.w
+				}
+				if end > avail {
+					t.Errorf("%s avail=%d wide=%v: layout is %d cells wide", res.key, avail, wide, end)
+				}
 			}
-			continue
 		}
-		if lipgloss.Width(got) != w {
-			t.Errorf("width = %d, want %d", lipgloss.Width(got), w)
-		}
-	}
-	// Styled input keeps its escape sequences.
-	got := truncateVisible("\x1b[38;2;242;242;242m 1736c7a\x1b[0m", 10)
-	if !strings.Contains(got, "\x1b[38;2;242;242;242m") {
-		t.Errorf("escape sequence lost: %q", got)
-	}
-	if lipgloss.Width(got) != 10 {
-		t.Errorf("width = %d, want 10", lipgloss.Width(got))
 	}
 }
 
-// TestArrowKeysMoveTheCursor checks the navigation keys reach the table.
-func TestArrowKeysMoveTheCursor(t *testing.T) {
-	a := newTestApp()
-	a.screen = screenVolumes
-	var rows []api.VolumeRow
-	for i := 0; i < 10; i++ {
-		rows = append(rows, api.VolumeRow{Name: fmt.Sprintf("volume-%d", i), Driver: "local", Scope: "local", Created: "2025-06-01"})
+func TestLayoutSharesSpareRoomLikeK9s(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	v := newTableView(a, contextRes, loadQuery{})
+	v.applyRows([]*row{testRow(contextRes, "x", "x", "x", "d", "e")})
+	plans := v.layout(136)
+	if len(plans) != 3 {
+		t.Fatalf("plans = %+v", plans)
 	}
-	a.volumes.SetRows(volumeTableRows(rows))
-	a.resize()
+	last := plans[len(plans)-1]
+	if last.x+last.w != 136 {
+		t.Errorf("columns end at %d, want the table filled to 136", last.x+last.w)
+	}
+	widths := []int{plans[0].w, plans[1].w, plans[2].w}
+	for _, w := range widths {
+		if w < 40 {
+			t.Errorf("widths = %v: with few columns they should spread across the screen", widths)
+		}
+	}
+}
 
-	if got := a.volumes.Cursor(); got != 0 {
-		t.Fatalf("initial cursor = %d, want 0", got)
+func TestRowRoles(t *testing.T) {
+	svc := func(mode, update string, running, desired int) api.Service {
+		return api.Service{Mode: mode, UpdateState: update, Running: running, Desired: desired}
 	}
+	for name, c := range map[string]struct {
+		got, want role
+	}{
+		"healthy":            {serviceRole(svc("replicated", "", 3, 3)), roleStd},
+		"degraded":           {serviceRole(svc("replicated", "", 1, 3)), roleErr},
+		"degraded+updating":  {serviceRole(svc("replicated", "updating", 1, 3)), rolePending},
+		"updating":           {serviceRole(svc("replicated", "updating", 3, 3)), rolePending},
+		"paused update":      {serviceRole(svc("replicated", "paused", 3, 3)), roleErr},
+		"scaled to zero":     {serviceRole(svc("replicated", "", 0, 0)), roleCompleted},
+		"global healthy":     {serviceRole(svc("global", "", 5, 5)), roleStd},
+		"task running":       {taskRole(api.Task{State: "running", Desired: "running"}), roleStd},
+		"task starting":      {taskRole(api.Task{State: "starting", Desired: "running"}), rolePending},
+		"task failed":        {taskRole(api.Task{State: "failed", Desired: "running"}), roleErr},
+		"task failed (old)":  {taskRole(api.Task{State: "failed", Desired: "shutdown"}), roleCompleted},
+		"task shutdown":      {taskRole(api.Task{State: "shutdown", Desired: "shutdown"}), roleCompleted},
+		"task being stopped": {taskRole(api.Task{State: "running", Desired: "shutdown"}), roleKill},
+		"node ready":         {nodeRole(api.Node{Status: "ready", Availability: "active"}), roleStd},
+		"node down":          {nodeRole(api.Node{Status: "down", Availability: "active"}), roleErr},
+		"node drained":       {nodeRole(api.Node{Status: "ready", Availability: "drain"}), rolePending},
+		"manager unreach.":   {nodeRole(api.Node{Status: "ready", Availability: "active", Manager: "unreachable"}), roleErr},
+	} {
+		if c.got != c.want {
+			t.Errorf("%s: role %d, want %d", name, c.got, c.want)
+		}
+	}
+}
 
-	down := tea.KeyMsg{Type: tea.KeyDown}
-	up := tea.KeyMsg{Type: tea.KeyUp}
-
-	a.volumes, _ = a.volumes.Update(down)
-	if got := a.volumes.Cursor(); got != 1 {
-		t.Errorf("after down, cursor = %d, want 1", got)
+func TestSaveWritesCSV(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", dir)
+	a := newTestApp(t, 140, 38)
+	a.press("/")
+	a.typeText("shop_w")
+	a.press("enter")
+	a.press("ctrl+s")
+	matches, _ := filepath.Glob(filepath.Join(dir, "swarmlens", "screen-dumps", "demo", "services-*.csv"))
+	if len(matches) != 1 {
+		t.Fatalf("expected one csv under %s, found %v", dir, matches)
 	}
-	a.volumes, _ = a.volumes.Update(down)
-	a.volumes, _ = a.volumes.Update(down)
-	if got := a.volumes.Cursor(); got != 3 {
-		t.Errorf("after 3 downs, cursor = %d, want 3", got)
+	raw, err := os.ReadFile(matches[0])
+	if err != nil {
+		t.Fatal(err)
 	}
-	a.volumes, _ = a.volumes.Update(up)
-	if got := a.volumes.Cursor(); got != 2 {
-		t.Errorf("after up, cursor = %d, want 2", got)
+	text := string(raw)
+	if !strings.HasPrefix(text, "NAME,MODE,REPLICAS,IMAGE,PORTS,UPDATE,AGE") && !strings.HasPrefix(text, "STACK,NAME,MODE") {
+		t.Errorf("csv header: %q", strings.SplitN(text, "\n", 2)[0])
 	}
-
-	// The cursor must not run past the ends.
-	for i := 0; i < 20; i++ {
-		a.volumes, _ = a.volumes.Update(down)
+	if !strings.Contains(text, "shop_web") || !strings.Contains(text, "shop_worker") || strings.Contains(text, "monitoring") {
+		t.Errorf("csv must hold exactly the filtered rows:\n%s", text)
 	}
-	if got := a.volumes.Cursor(); got != len(rows)-1 {
-		t.Errorf("cursor = %d, want %d (last row)", got, len(rows)-1)
-	}
-	for i := 0; i < 20; i++ {
-		a.volumes, _ = a.volumes.Update(up)
-	}
-	if got := a.volumes.Cursor(); got != 0 {
-		t.Errorf("cursor = %d, want 0 (first row)", got)
-	}
+	mustContain(t, a.screenText(), "File saved to")
 }

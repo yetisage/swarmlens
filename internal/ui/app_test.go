@@ -1,471 +1,843 @@
 package ui
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/muesli/termenv"
 
 	"swarmlens/internal/api"
 )
 
-func svc(id, name string, running, desired int) api.ServiceRow {
-	return api.ServiceRow{
-		ID: id, ShortID: api.ShortID(id), Name: name,
-		Image: "nginx", Mode: "replicated",
-		Running: running, Desired: desired,
-		Replicas: itoa(running) + "/" + itoa(desired),
+func TestInitialViewIsServicesWithHeader(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	s := a.screenText()
+	mustContain(t, s,
+		"Context:  demo [RW]", "Swarm:    acme-prod (6/7 ready)", "Node:     manager-1 (leader)",
+		"services(all)[14]", "NAME↑", "shop_worker", "<services>",
+		"<0>", "<?>", "swarm", // menu and logo
+	)
+}
+
+func TestCommandPromptSwitchesResource(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("nodes")
+	s := a.screenText()
+	mustContain(t, s, "nodes(all)[7]", "worker-4", "<nodes>")
+	mustNotContain(t, s, "<services>")
+
+	a.command("ps") // an alias
+	mustContain(t, a.screenText(), "tasks(all)[")
+}
+
+func TestCommandWithStackAndFilter(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("svc shop /api")
+	s := a.screenText()
+	mustContain(t, s, "services(shop)[1]", "</api>", "shop_api")
+	mustNotContain(t, s, "shop_web", "monitoring_grafana")
+	if a.scope != "shop" {
+		t.Errorf("scope = %q, want shop", a.scope)
+	}
+	a.command("svc all")
+	if a.scope != "" {
+		t.Errorf("scope = %q after 'all', want empty", a.scope)
 	}
 }
 
-func itoa(n int) string {
-	if n == 0 {
-		return "0"
-	}
-	var b []byte
-	for n > 0 {
-		b = append([]byte{byte('0' + n%10)}, b...)
-		n /= 10
-	}
-	return string(b)
+func TestUnknownCommandShowsTheWhaleAndDismisses(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("zzz")
+	mustContain(t, a.screenText(), "<error>", "`zzz` command not found", "Dismiss")
+	a.press("enter")
+	mustNotContain(t, a.screenText(), "<error>")
+	mustContain(t, a.screenText(), "services(all)")
 }
 
-func newTestApp() *app {
-	a := NewApp(nil, &api.SwarmState{State: "active", Role: "manager"})
-	a.width, a.height = 100, 30
-	a.resize()
-	return a
-}
-
-// TestSelectionSurvivesReorder is the regression test for the stale
-// selection bug: a live refresh that reorders rows must keep the same
-// service selected.
-func TestSelectionSurvivesReorder(t *testing.T) {
-	a := newTestApp()
-	a.applyServices([]api.ServiceRow{svc("id-a", "alpha", 1, 1), svc("id-b", "beta", 1, 1)})
-
-	// Select the second row.
-	a.services.SetCursor(1)
-	a.selectedServiceID = "id-b"
-	if got := a.currentService(); got == nil || got.Name != "beta" {
-		t.Fatalf("expected beta selected, got %v", got)
+func TestPromptSuggestionsAndTabCompletion(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.press(":")
+	a.typeText("sec")
+	if g := a.ghost(); g != "ret" {
+		t.Errorf("ghost after %q = %q, want the shortest candidate to extend it", "sec", g)
 	}
-
-	// The refresh returns the same services in the opposite order.
-	a.applyServices([]api.ServiceRow{svc("id-b", "beta", 1, 1), svc("id-a", "alpha", 1, 1)})
-
-	if got := a.currentService(); got == nil || got.Name != "beta" {
-		t.Fatalf("selection lost across reorder, got %v", got)
+	a.press("tab")
+	if got := a.pr.in.String(); got != "secret" {
+		t.Errorf("after tab the prompt holds %q, want secret", got)
 	}
-	if a.services.Cursor() != 0 {
-		t.Errorf("cursor = %d, want 0 (beta moved to the first row)", a.services.Cursor())
+	a.press("enter")
+	mustContain(t, a.screenText(), "secrets(all)")
+
+	// With nothing typed the history is offered.
+	a.press(":")
+	if g := a.ghost(); g != "secret" {
+		t.Errorf("empty prompt ghost = %q, want the last command %q", g, "secret")
+	}
+	a.press("esc")
+	if a.pr.mode != promptOff {
+		t.Error("esc must close the prompt")
 	}
 }
 
-// TestSelectionFallsBackWhenServiceDisappears covers a service that is
-// removed while it is selected.
-func TestSelectionFallsBackWhenServiceDisappears(t *testing.T) {
-	a := newTestApp()
-	a.applyServices([]api.ServiceRow{svc("id-a", "alpha", 1, 1), svc("id-b", "beta", 1, 1)})
-	a.services.SetCursor(1)
-	a.selectedServiceID = "id-b"
-
-	a.applyServices([]api.ServiceRow{svc("id-a", "alpha", 1, 1)})
-
-	if got := a.currentService(); got == nil || got.Name != "alpha" {
-		t.Fatalf("expected fallback to alpha, got %v", got)
-	}
-	if a.selectedServiceID != "id-a" {
-		t.Errorf("selected id = %q, want id-a", a.selectedServiceID)
+func TestStackNameCompletionAfterResource(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.press(":")
+	a.typeText("svc mon")
+	if g := a.ghost(); g != "itoring" {
+		t.Errorf("ghost = %q, want itoring", g)
 	}
 }
 
-// TestCurrentServiceNeverReturnsStaleData verifies the pointer fix: the
-// resolved service must reflect the latest data, not an old snapshot.
-func TestCurrentServiceNeverReturnsStaleData(t *testing.T) {
-	a := newTestApp()
-	a.applyServices([]api.ServiceRow{svc("id-a", "alpha", 1, 1)})
-	a.selectedServiceID = "id-a"
+func TestStackKeysSwitchScope(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.press("1") // favourites are alphabetical until used: ci
+	mustContain(t, a.screenText(), "services(ci)[3]")
+	mustNotContain(t, a.screenText(), "shop_web")
+	a.press("0")
+	mustContain(t, a.screenText(), "services(all)[14]")
 
-	// The service is updated (new replica count) by a refresh.
-	a.applyServices([]api.ServiceRow{svc("id-a", "alpha", 2, 3)})
-
-	got := a.currentService()
-	if got == nil {
-		t.Fatal("currentService returned nil")
-	}
-	if got.Running != 2 || got.Desired != 3 {
-		t.Errorf("stale data: running=%d desired=%d, want 2/3", got.Running, got.Desired)
+	// The most recently used stack moves to the front.
+	a.press("3") // shop
+	a.press("0")
+	if got := a.favStacks(); got[0] != "shop" {
+		t.Errorf("favourites = %v, want shop first", got)
 	}
 }
 
-func TestFilterServices(t *testing.T) {
-	a := newTestApp()
-	rows := []api.ServiceRow{
-		{ID: "1", Name: "web", Image: "nginx"},
-		{ID: "2", Name: "db", Image: "postgres"},
-		{ID: "3", Name: "web-cache", Image: "redis"},
-	}
+func TestEnterDrillsIntoTasksAndEscGoesBack(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("svc /shop_web")
+	a.press("enter")
+	s := a.screenText()
+	mustContain(t, s, "tasks(shop_web)[", "shop_web.1", "<services>", "<tasks>")
+	mustNotContain(t, s, "SERVICE ", "STACK ", "<0>") // drilled views drop the scope columns and keys
 
-	a.filter = "web"
-	got := a.filterServices(rows)
-	if len(got) != 2 {
-		t.Fatalf("filtered to %d rows, want 2", len(got))
-	}
+	a.press("esc")
+	mustContain(t, a.screenText(), "services(all)")
+	mustNotContain(t, a.screenText(), "<tasks>")
 
-	a.filter = "redis"
-	got = a.filterServices(rows)
-	if len(got) != 1 || got[0].Name != "web-cache" {
-		t.Fatalf("filter by image failed: %v", got)
-	}
-
-	a.filter = ""
-	if len(a.filterServices(rows)) != 3 {
-		t.Fatal("empty filter should match everything")
+	// q goes back too, and does nothing at the root, like k9s.
+	a.press("q")
+	mustContain(t, a.screenText(), "services(all)")
+	if len(a.stack) != 1 {
+		t.Errorf("stack depth %d after q at the root", len(a.stack))
 	}
 }
 
-func TestApplyFilterUpdatesTable(t *testing.T) {
-	a := newTestApp()
-	a.applyServices([]api.ServiceRow{
-		{ID: "1", Name: "web", Image: "nginx"},
-		{ID: "2", Name: "db", Image: "postgres"},
-	})
-	a.filter = "db"
-	a.applyFilter()
+func TestNodeDrillDownShowsItsTasks(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("nodes")
+	a.press("down", "down", "down") // worker-1
+	a.press("enter")
+	mustContain(t, a.screenText(), "tasks(node:worker-1)[")
+}
 
-	if len(a.services.Rows()) != 1 {
-		t.Fatalf("table has %d rows, want 1", len(a.services.Rows()))
+func TestFilterIsLiveAndEscClearsIt(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.press("/")
+	a.typeText("shop")
+	if a.pr.mode != promptFilter {
+		t.Fatal("/ must open the filter prompt")
+	}
+	mustContain(t, a.screenText(), "services(all)[5]", "</shop>") // already filtering while typing
+	a.press("enter")
+	if a.pr.mode != promptOff {
+		t.Error("enter must close the prompt")
+	}
+	mustContain(t, a.screenText(), "</shop>")
+	a.press("esc")
+	mustContain(t, a.screenText(), "services(all)[14]")
+	mustNotContain(t, a.screenText(), "</shop>")
+}
+
+func TestInverseFilter(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.press("/")
+	a.typeText("!shop")
+	a.press("enter")
+	s := a.screenText()
+	mustContain(t, s, "services(all)[9]", "monitoring_grafana")
+	mustNotContain(t, s, "shop_web")
+}
+
+func TestFilterEscWhileTypingCancelsIt(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.press("/")
+	a.typeText("shop")
+	a.press("esc")
+	mustContain(t, a.screenText(), "services(all)[14]")
+	if a.pr.mode != promptOff {
+		t.Error("prompt still open")
 	}
 }
 
-// TestCommandSwitchesResourceViews checks that resource types are reached
-// through the ":" command, as in k9s, rather than via dedicated keys.
-func TestCommandSwitchesResourceViews(t *testing.T) {
-	cases := []struct {
-		word string
-		want screen
-	}{
-		{"svc", screenServices},
-		{"service", screenServices},
-		{"services", screenServices},
-		{"no", screenNodes},
-		{"node", screenNodes},
-		{"vol", screenVolumes},
-		{"net", screenNetworks},
-		{"sec", screenSecrets},
-		{"cfg", screenConfigs},
+func TestSortKeysToggleDirection(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.press("R")
+	mustContain(t, a.screenText(), "REPLICAS↑")
+	tv := a.view().(*tableView)
+	if first := tv.rows[0].name; first != "ci_backup" && first != "ci_legacy" {
+		t.Errorf("ascending replicas ratio should list 0/x first, got %s", first)
 	}
-	for _, c := range cases {
-		a := newTestApp()
-		a.command.open()
+	a.press("R")
+	mustContain(t, a.screenText(), "REPLICAS↓")
+	a.press("N")
+	mustContain(t, a.screenText(), "NAME↑")
+}
 
-		// Type the command word.
-		for _, r := range c.word {
-			a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+func TestSelectedColumnSort(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.press("shift+right") // STACK
+	a.press("shift+right") // NAME
+	a.press("shift+right") // MODE
+	a.press("O")
+	mustContain(t, a.screenText(), "MODE↑")
+}
+
+func TestFaultsToggle(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.press("ctrl+z")
+	s := a.screenText()
+	mustContain(t, s, "services(all)[1]", "shop_worker")
+	mustNotContain(t, s, "shop_web")
+	a.press("ctrl+z")
+	mustContain(t, a.screenText(), "services(all)[14]")
+}
+
+func TestWideToggleAddsColumns(t *testing.T) {
+	a := newTestApp(t, 200, 38)
+	mustNotContain(t, a.screenText(), "CONSTRAINTS")
+	a.press("ctrl+w")
+	mustContain(t, a.screenText(), "CONSTRAINTS", "UPDATED")
+	a.press("ctrl+w")
+	mustNotContain(t, a.screenText(), "CONSTRAINTS")
+}
+
+func TestMarksAndBulkDelete(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("svc /shop_(cache|db)")
+	a.press("space", "space")
+	tv := a.view().(*tableView)
+	if len(tv.marks) != 2 {
+		t.Fatalf("marked %d rows, want 2", len(tv.marks))
+	}
+	a.press("ctrl+d")
+	mustContain(t, a.screenText(), "<Delete>", "Delete 2 services?", "Cancel", "OK")
+	a.press("tab", "enter") // move the focus to OK
+	if a.modal != nil {
+		t.Fatal("dialog still open")
+	}
+	a.refreshNow()
+	a.command("svc all")
+	s := a.screenText()
+	mustNotContain(t, s, "shop_cache", "shop_db")
+	mustContain(t, s, "shop_web", "services(all)[12]")
+}
+
+func TestDeleteDialogDefaultsToCancel(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.press("ctrl+d")
+	d, ok := a.modal.(*dialog)
+	if !ok {
+		t.Fatal("no dialog")
+	}
+	if d.focus != 0 || d.buttons[0].label != "Cancel" {
+		t.Errorf("focus on %d (%s), want Cancel first so a stray enter cannot delete", d.focus, d.buttons[d.focus].label)
+	}
+	a.press("enter")
+	a.refreshNow()
+	mustContain(t, a.screenText(), "services(all)[14]")
+}
+
+func TestScaleDialogSetsReplicas(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("svc /shop_web")
+	a.press("s")
+	mustContain(t, a.screenText(), "<Scale>", `Scale service "shop_web"?`, "Replicas: 4")
+	for i := 0; i < 3; i++ {
+		a.press("backspace")
+	}
+	a.typeText("6")
+	a.typeText("x") // not a digit: ignored
+	a.press("enter")
+	if a.modal != nil {
+		t.Fatal("dialog still open")
+	}
+	svcs, _ := a.be.Services(context.Background())
+	for _, s := range svcs {
+		if s.Name == "shop_web" && s.Desired != 6 {
+			t.Errorf("shop_web desired = %d, want 6", s.Desired)
 		}
-		a.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-		if a.screen != c.want {
-			t.Errorf("command %q switched to %v, want %v", c.word, a.screen, c.want)
+	}
+	mustContain(t, a.screenText(), "Scaled shop_web to 6")
+}
+
+func TestScaleRefusedForGlobalServices(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("svc /traefik")
+	a.press("s")
+	if a.modal != nil {
+		t.Error("no dialog for a global service")
+	}
+	mustContain(t, a.screenText(), "global mode and cannot be scaled")
+}
+
+func TestRestartRollsServiceAndShowsUpdate(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("svc /shop_web")
+	a.press("r")
+	a.refreshNow()
+	mustContain(t, a.screenText(), "Restarted shop_web", "updating")
+}
+
+func TestRollbackNeedsPreviousSpec(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("svc /shop_db")
+	a.press("b")
+	mustContain(t, a.screenText(), "no previous spec")
+
+	a.command("svc /shop_api")
+	a.press("b")
+	mustContain(t, a.screenText(), "<Rollback>", "Roll back service")
+	a.press("tab", "enter")
+	a.refreshNow()
+	mustContain(t, a.screenText(), "Rolled back shop_api", "rollback started")
+}
+
+func TestNodeActionsDrainAndConfirm(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("nodes")
+	a.press("down", "down", "down") // worker-1
+	a.press("r")
+	mustContain(t, a.screenText(), "<Drain>", `Drain node "worker-1"?`)
+	a.press("tab", "enter")
+	a.refreshNow()
+	tv := a.view().(*tableView)
+	for _, r := range tv.rows {
+		if r.name == "worker-1" && r.cells[ndAvail] != "drain" {
+			t.Errorf("worker-1 availability = %q, want drain", r.cells[ndAvail])
+		}
+	}
+
+	a.press("c") // cordon is immediate (no confirmation)
+	a.refreshNow()
+	for _, r := range a.view().(*tableView).rows {
+		if r.name == "worker-1" && r.cells[ndAvail] != "pause" {
+			t.Errorf("after cordon: %q", r.cells[ndAvail])
 		}
 	}
 }
 
-// TestCommandCarriesFilter checks the k9s-style ":resource /filter"
-// argument.
-func TestCommandCarriesFilter(t *testing.T) {
-	a := newTestApp()
-	a.applyServices([]api.ServiceRow{
-		{ID: "1", Name: "web", Image: "nginx"},
-		{ID: "2", Name: "db", Image: "postgres"},
-	})
-	a.command.open()
-	a.command.input.SetValue("service /web")
-	a.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+func TestPromoteAlreadyManagerIsRefused(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("nodes")
+	a.press("p") // manager-1 is a manager already
+	if a.modal != nil {
+		t.Error("promoting a manager must not open a dialog")
+	}
+	mustContain(t, a.screenText(), "already a manager")
+}
 
-	if a.screen != screenServices {
-		t.Fatalf("screen = %v, want services", a.screen)
+func TestReadOnlyModeBlocksMutations(t *testing.T) {
+	opt := testOpts()
+	opt.ReadOnly = true
+	a := newTestAppOpts(t, opt, 140, 38)
+	s := a.screenText()
+	mustContain(t, s, "demo [RO]")
+	mustNotContain(t, s, "<ctrl-d>", "<s>", "<r>", "<b>") // mutating actions leave the menu
+	mustContain(t, s, "<d>", "<l>")                       // reading ones stay
+	a.press("ctrl+d")
+	if a.modal != nil {
+		t.Error("a delete dialog opened in read-only mode")
 	}
-	if a.filter != "web" {
-		t.Errorf("filter = %q, want web", a.filter)
+	mustContain(t, a.screenText(), "read-only mode")
+}
+
+func TestDescribeAndYAMLViews(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("svc /shop_web")
+	a.press("d")
+	s := a.screenText()
+	mustContain(t, s, "describe(shop_web)", "<describe>", "Name:", "shop_web", "<f>", "Toggle FullScreen")
+	a.press("esc")
+	a.press("y")
+	mustContain(t, a.screenText(), "yaml(shop_web)", "<yaml>", "Name: shop_web")
+	a.press("esc")
+	mustContain(t, a.screenText(), "services(all)")
+}
+
+func TestTextViewSearchAndFullscreen(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("svc /shop_web")
+	a.press("y")
+	a.press("/")
+	a.typeText("Image")
+	mustContain(t, a.screenText(), "</Image>")
+	tv := a.view().(*textView)
+	if len(tv.matches) == 0 {
+		t.Error("no matches found for Image")
 	}
-	if len(a.visibleServices()) != 1 {
-		t.Errorf("filtered to %d services, want 1", len(a.visibleServices()))
+	a.press("enter")
+	a.press("n")
+	a.press("esc") // clears the search first
+	mustNotContain(t, a.screenText(), "</Image>")
+	mustContain(t, a.screenText(), "yaml(shop_web)")
+
+	a.press("f")
+	s := a.screenText()
+	mustNotContain(t, s, "Context:") // fullscreen hides the header...
+	mustNotContain(t, s, "<yaml>")   // ...and the crumbs
+	a.press("f")
+	mustContain(t, a.screenText(), "Context:")
+}
+
+func TestLogsViewTogglesAndStops(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("svc /shop_web")
+	a.press("l")
+	s := a.screenText()
+	mustContain(t, s, "logs(shop_web)[tail 100]", "<logs>", "Autoscroll:On", "FullScreen:Off", "Timestamps:Off", "Wrap:Off", "shop_web.")
+	lv := a.view().(*logView)
+	if len(lv.lines) == 0 {
+		t.Fatal("no log lines loaded")
+	}
+
+	a.press("t")
+	mustContain(t, a.screenText(), "Timestamps:On")
+	a.press("w")
+	mustContain(t, a.screenText(), "Wrap:On")
+	a.press("s")
+	mustContain(t, a.screenText(), "Autoscroll:Off")
+	a.press("s")
+	mustContain(t, a.screenText(), "Autoscroll:On")
+
+	a.press("2") // last 5 minutes
+	mustContain(t, a.screenText(), "logs(shop_web)[last 5m]")
+	a.press("0")
+	mustContain(t, a.screenText(), "[tail 100]")
+
+	a.press("esc")
+	if lv.cancel != nil {
+		t.Error("leaving the logs must cancel the stream")
+	}
+	mustContain(t, a.screenText(), "services(all)")
+}
+
+func TestLogsFilterAndANSIColours(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("svc /shop_worker")
+	a.press("l")
+	lv := a.view().(*logView)
+	s := a.screenText()
+	mustContain(t, s, "INFO") // the ANSI-coloured level, with the escape sequences gone
+	mustNotContain(t, s, "\x1b", "[32m")
+
+	a.press("/")
+	a.typeText("ERROR")
+	a.press("enter")
+	mustContain(t, a.screenText(), "</ERROR>")
+	for _, l := range lv.shown() {
+		if !strings.Contains(l.Text, "ERROR") {
+			t.Fatalf("line %q passed the ERROR filter", l.Text)
+		}
+	}
+	mustNotContain(t, a.screenText(), "INFO")
+}
+
+func TestTaskLogsAndJumpOwner(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("svc /shop_web")
+	a.press("enter") // tasks of the service
+	a.press("enter") // enter on a task opens its logs
+	mustContain(t, a.screenText(), "logs(shop_web.")
+	a.press("esc")
+	a.press("J")
+	tv := a.view().(*tableView)
+	if tv.res.key != "services" || tv.selected() == nil || tv.selected().name != "shop_web" {
+		t.Fatalf("jump owner: view %s, selected %v, want services with shop_web selected", tv.res.key, tv.selected())
+	}
+	mustContain(t, a.screenText(), "services(all)[14]")
+}
+
+func TestHelpListsTheKeysOfTheCurrentView(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.press("?")
+	s := a.screenText()
+	mustContain(t, s, "Help", "RESOURCE", "GENERAL", "NAVIGATION", "HOTKEYS", "<ctrl-d>", "Delete", "<esc>", "Toggle Wide", "<:cmd>", "<shift-g>", "<help>")
+	a.press("?") // toggles
+	mustContain(t, a.screenText(), "services(all)")
+	a.press("?")
+	a.press("esc")
+	mustContain(t, a.screenText(), "services(all)")
+}
+
+func TestAliasView(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.press("ctrl+a")
+	mustContain(t, a.screenText(), "aliases(all)[", "RESOURCE", "service services srv svc", "<aliases>")
+	// Enter goes to the resource under the cursor.
+	a.press("down") // nodes? first sorted row is "aliases" itself; step to a real one
+	a.press("enter")
+	if _, ok := a.view().(*tableView); !ok || a.view().crumb() == "aliases" {
+		t.Errorf("enter on an alias did not navigate (crumb %q)", a.view().crumb())
 	}
 }
 
-// TestCommandDoesNotOfferActions checks that the command mode is for
-// navigation only — no actions live there.
-func TestCommandDoesNotOfferActions(t *testing.T) {
-	if len(aliases) == 0 {
-		t.Fatal("expected a resource alias table")
+func TestUserAliasesFromConfig(t *testing.T) {
+	opt := testOpts()
+	opt.Config = nil
+	a := newTestAppOpts(t, opt, 140, 38)
+	a.cfg.Aliases["dp"] = "services"
+	a.cfg.Aliases["sec"] = "secrets"
+	a.command("nodes")
+	a.command("dp")
+	mustContain(t, a.screenText(), "services(all)")
+	a.press("ctrl+a")
+	mustContain(t, a.screenText(), "dp")
+}
+
+func TestHistoryKeys(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("nodes")
+	a.command("secrets")
+	a.press("[")
+	mustContain(t, a.screenText(), "nodes(all)")
+	a.press("[")
+	mustContain(t, a.screenText(), "services(all)")
+	a.press("]")
+	mustContain(t, a.screenText(), "nodes(all)")
+	a.press("]", "]")
+	mustContain(t, a.screenText(), "secrets(all)")
+	mustContain(t, a.screenText(), "forward any further")
+	a.press("-") // last used command: swaps with the one before
+	mustContain(t, a.screenText(), "nodes(all)")
+	a.press("-")
+	mustContain(t, a.screenText(), "secrets(all)")
+}
+
+func TestHeaderAndCrumbToggles(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.press("ctrl+e")
+	mustNotContain(t, a.screenText(), "Context:")
+	a.press("ctrl+e")
+	mustContain(t, a.screenText(), "Context:")
+	a.press("ctrl+g")
+	mustNotContain(t, a.screenText(), "<services>")
+	a.press("ctrl+g")
+	mustContain(t, a.screenText(), "<services>")
+}
+
+func TestCrumbsStackAndFlashExpiry(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("svc /shop_web")
+	a.press("enter")
+	a.press("d")
+	mustContain(t, a.screenText(), "<services>", "<tasks>", "<describe>")
+
+	a.flash(flashErr, "boom")
+	mustContain(t, a.screenText(), "boom")
+	a.flashMsg.until = a.flashMsg.until.Add(-flashDuration * 2)
+	mustNotContain(t, a.screenText(), "boom")
+}
+
+func TestMultiRuneKeyMessagesAreSplit(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	// Characters read in one go arrive as a single message.
+	_, cmd := a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(":no")})
+	a.drain(cmd)
+	if a.pr.mode != promptCommand || a.pr.in.String() != "no" {
+		t.Fatalf("prompt mode %v text %q, want a command prompt holding \"no\"", a.pr.mode, a.pr.in.String())
 	}
-	for _, al := range aliases {
-		for _, n := range al.names() {
-			if strings.Contains(n, "scale") || strings.Contains(n, "delete") {
-				t.Errorf("the command mode must not offer actions, found %q", n)
+	a.press("enter")
+	mustContain(t, a.screenText(), "nodes(all)")
+}
+
+func TestPasteGoesIntoThePromptOnly(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	_, _ = a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("nodes"), Paste: true})
+	mustContain(t, a.screenText(), "services(all)") // ignored outside inputs
+
+	a.press("/")
+	_, _ = a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("shop_web"), Paste: true})
+	if a.pr.in.String() != "shop_web" {
+		t.Errorf("pasted text %q", a.pr.in.String())
+	}
+	mustContain(t, a.screenText(), "services(all)[1]")
+}
+
+func TestTooSmallTerminal(t *testing.T) {
+	a := newTestApp(t, 30, 8)
+	mustContain(t, a.screenText(), "Terminal too small")
+}
+
+func TestSmallTerminalsStayWellFormed(t *testing.T) {
+	for _, size := range [][2]int{{40, 10}, {60, 20}, {80, 24}, {100, 30}, {200, 60}} {
+		a := newTestApp(t, size[0], size[1])
+		for _, cmd := range []string{"svc", "tasks", "nodes", "stacks", "events", "ctx"} {
+			a.command(cmd)
+			c := a.screen()
+			lines := strings.Split(c.Text(), "\n")
+			if len(lines) != size[1] {
+				t.Errorf("%dx%d %s: %d lines, want %d", size[0], size[1], cmd, len(lines), size[1])
+			}
+			for i, l := range lines {
+				if w := textWidth(l); w > size[0] {
+					t.Errorf("%dx%d %s: line %d is %d cells wide", size[0], size[1], cmd, i, w)
+				}
 			}
 		}
+		a.press("?")
+		a.press("esc")
 	}
 }
 
-// TestCommandRejectsUnknownResource checks the error path.
-func TestCommandRejectsUnknownResource(t *testing.T) {
-	a := newTestApp()
-	a.command.open()
-	a.command.input.SetValue("bogus")
-	a.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
-
-	if a.command.err == "" {
-		t.Error("expected an error for an unknown command")
+func TestEventsViewCollectsEvents(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	for i := 0; i < 3; i++ {
+		a.Update(eventMsg{ev: api.Event{Type: "service", Action: "update", Name: "shop_web", Stack: "shop", Attrs: map[string]string{"updatestate.new": "updating"}}})
 	}
-	if a.screen != screenServices {
-		t.Errorf("screen = %v, want to stay on services", a.screen)
+	a.command("events")
+	s := a.screenText()
+	mustContain(t, s, "events(all)[3]", "service", "update", "shop_web", "updatestate.new=updating")
+}
+
+func TestEventTriggersDebouncedRefresh(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	_, _ = a.Update(eventMsg{ev: api.Event{Type: "service", Action: "update", Name: "x"}})
+	if !a.eventPending {
+		t.Error("an event must schedule a refresh")
+	}
+	_, _ = a.Update(refreshMsg{})
+	if a.eventPending {
+		t.Error("the refresh must clear the pending flag")
 	}
 }
 
-// TestCommandHistory checks the command history, like k9s' command buffer.
-func TestCommandHistory(t *testing.T) {
-	a := newTestApp()
-	for _, word := range []string{"service", "node"} {
-		a.command.open()
-		a.command.input.SetValue(word)
-		a.handleKey(tea.KeyMsg{Type: tea.KeyEnter})
+func TestContextSwitch(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("ctx")
+	mustContain(t, a.screenText(), "contexts(all)[2]", "demo(*)", "lab")
+	a.press("down", "enter")
+	if a.be.ContextName() != "lab" {
+		t.Fatalf("context = %q, want lab", a.be.ContextName())
 	}
-	if len(a.command.history) != 2 {
-		t.Fatalf("history has %d entries, want 2", len(a.command.history))
-	}
-	// The history is offered as suggestions when the prompt is empty.
-	a.command.open()
-	if len(a.command.suggestions) != 2 {
-		t.Fatalf("expected the two history entries as suggestions, got %d", len(a.command.suggestions))
-	}
-	if a.command.suggestions[0] != "node" {
-		t.Errorf("first suggestion = %q, want node", a.command.suggestions[0])
+	s := a.screenText()
+	mustContain(t, s, "Context:  lab", "services(all)")
+
+	a.command("ctx demo")
+	if a.be.ContextName() != "demo" {
+		t.Errorf("context = %q after :ctx demo", a.be.ContextName())
 	}
 }
 
-// TestSingleLetterKeysDoNotSwitchViews makes sure the letter keys are free
-// for context-sensitive actions.
-func TestSingleLetterKeysDoNotSwitchViews(t *testing.T) {
-	a := newTestApp()
-	for _, r := range []rune{'s', 'n', 'v', 'w', 'k', 'c'} {
-		a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
-		if a.screen != screenServices {
-			t.Errorf("pressing %q switched to %v, want to stay on services", r, a.screen)
+func TestStackDeleteRemovesEverything(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.command("stacks")
+	a.press("down", "down") // shop
+	a.press("ctrl+d")
+	mustContain(t, a.screenText(), `Delete stack "shop"?`, "Volumes are kept")
+	a.press("tab", "enter")
+	a.refreshNow()
+	mustContain(t, a.screenText(), "stacks(all)[2]", "Deleted stack shop")
+	for _, r := range a.view().(*tableView).rows {
+		if r.name == "shop" {
+			t.Error("stack shop is still listed")
 		}
 	}
 }
 
-// TestSameKeyMeansDifferentThingsPerView checks the k9s-style behaviour:
-// "x" removes a service in the services view and a node in the nodes view.
-func TestSameKeyMeansDifferentThingsPerView(t *testing.T) {
-	a := newTestApp()
-	a.applyServices([]api.ServiceRow{svc("id-a", "web", 1, 1)})
-	a.services.SetCursor(0)
-	a.selectedServiceID = "id-a"
+func TestPluginsAppearInMenuAndHelp(t *testing.T) {
+	opt := testOpts()
+	a := newTestAppOpts(t, opt, 140, 38)
+	a.cfg.Plugins = append(a.cfg.Plugins, pluginForTest("L", "Logs in a pane", []string{"services"}))
+	s := a.screenText()
+	mustContain(t, s, "<shift-l>", "Logs in a pane")
+	a.press("?")
+	mustContain(t, a.screenText(), "<shift-l>")
+	a.press("esc")
+	a.command("nodes") // scope: services only
+	mustNotContain(t, a.screenText(), "Logs in a pane")
+}
 
-	// In the services view, ctrl-d asks to delete the service.
-	a.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
-	if !a.confirm.active {
-		t.Fatal("expected a confirmation prompt in the services view")
-	}
-	if !strings.Contains(a.confirm.title, "web") {
-		t.Errorf("confirmation mentions %q, want the service name", a.confirm.title)
-	}
-	a.confirm.active = false
-
-	// In the nodes view, the same key asks to delete the node.
-	a.screen = screenNodes
-	a.nodeRows = []api.NodeRow{{ID: "node-1", Hostname: "worker-1", Role: "worker", Availability: "active", Status: "ready"}}
-	a.applyNodes(a.nodeRows)
-	a.nodes.SetCursor(0)
-	a.selectedNodeID = "node-1"
-
-	a.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
-	if !a.confirm.active {
-		t.Fatal("expected a confirmation prompt in the nodes view")
-	}
-	if !strings.Contains(a.confirm.title, "worker-1") {
-		t.Errorf("confirmation mentions %q, want the node name", a.confirm.title)
+func TestPaletteSurvivesLowColourTerminals(t *testing.T) {
+	opt := testOpts()
+	opt.Profile = termenv.ANSI256
+	a := newTestAppOpts(t, opt, 100, 30)
+	out := a.View()
+	if !strings.Contains(out, "\x1b[") || strings.Contains(out, "38;2;") {
+		t.Error("a 256-colour terminal must not receive 24-bit colour sequences")
 	}
 }
 
-// TestActionBarShowsCurrentViewKeys checks that the footer lists the keys
-// that apply to the current resource view.
-func TestActionBarShowsCurrentViewKeys(t *testing.T) {
-	a := newTestApp()
-	a.applyServices([]api.ServiceRow{svc("id-a", "web", 1, 1)})
-	a.services.SetCursor(0)
-	a.selectedServiceID = "id-a"
+func TestViewIsExactlyTheTerminalSize(t *testing.T) {
+	a := newTestApp(t, 120, 36)
+	out := a.View()
+	if n := strings.Count(out, "\n") + 1; n != 36 {
+		t.Errorf("View has %d lines, want 36", n)
+	}
+}
 
-	bar := a.actionBar()
-	for _, want := range []string{"<s>", "<u>", "<ctrl+d>", "<:> Cmd"} {
-		if !strings.Contains(bar, want) {
-			t.Errorf("action bar %q is missing %q", bar, want)
+func TestQuitCommands(t *testing.T) {
+	for _, word := range []string{"q", "quit", "q!", "exit"} {
+		a := newTestApp(t, 140, 38)
+		a.press(":")
+		a.typeText(word)
+		_, cmd := a.Update(keyMsg("enter"))
+		if cmd == nil {
+			t.Fatalf(":%s returned no command", word)
+		}
+		if _, ok := cmd().(tea.QuitMsg); !ok {
+			t.Errorf(":%s did not quit", word)
 		}
 	}
+	a := newTestApp(t, 140, 38)
+	_, cmd := a.Update(keyMsg("ctrl+c"))
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Error("ctrl+c must quit")
+	}
+}
 
-	a.screen = screenNodes
-	bar = a.actionBar()
-	for _, want := range []string{"<D>", "<A>", "<p>", "<w>"} {
-		if !strings.Contains(bar, want) {
-			t.Errorf("node action bar %q is missing %q", bar, want)
+// failingBackend makes every summary fail, like an unreachable daemon.
+type failingBackend struct{ api.Backend }
+
+func (failingBackend) Summary(context.Context) (*api.Summary, error) {
+	return nil, errString("dial unix /var/run/docker.sock: connect: no such file or directory")
+}
+
+type errString string
+
+func (e errString) Error() string { return string(e) }
+
+func TestUnreachableDaemonExplainsItselfOnce(t *testing.T) {
+	opt := testOpts()
+	opt.Backend = failingBackend{opt.Backend}
+	a := New(opt)
+	a.w, a.h = 140, 38
+	a.drain(a.runCommand("services", true))
+	a.drain(a.loadSummary())
+	mustContain(t, a.screenText(), "<error>", "Cannot reach the Docker daemon", "no such file or directory", "Dismiss")
+	mustContain(t, a.screenText(), "Context:  demo [RW]", "Swarm:    n/a") // the header still draws, with n/a
+
+	a.press("enter") // dismiss
+	a.drain(a.loadSummary())
+	if a.modal != nil {
+		t.Error("the dialog must not reappear on every retry")
+	}
+	mustContain(t, a.screenText(), "no such file or directory") // but the flash line keeps saying so
+
+	// Once the daemon is back the failure state clears.
+	a.Update(summaryMsg{s: &api.Summary{SwarmState: "active", Role: "manager"}})
+	if a.unreachable {
+		t.Error("a good summary must clear the failure state")
+	}
+}
+
+func TestNotInASwarmExplainsWhy(t *testing.T) {
+	for state, want := range map[string]struct {
+		s    api.Summary
+		text string
+	}{
+		"inactive": {api.Summary{SwarmState: "inactive"}, "not part of a swarm"},
+		"worker":   {api.Summary{SwarmState: "active", Role: "worker"}, "worker node"},
+	} {
+		a := newTestApp(t, 140, 38)
+		a.summary = nil
+		a.Update(summaryMsg{s: &want.s})
+		mustContain(t, a.screenText(), "<error>", want.text)
+		a.press("esc")
+		if a.modal != nil {
+			t.Errorf("%s: dialog not dismissed", state)
 		}
 	}
-	if strings.Contains(bar, "scale") {
-		t.Errorf("node action bar should not offer scaling: %q", bar)
+}
+
+func TestCtrlCQuitsEvenOverADialogOrPrompt(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.press("ctrl+d") // delete dialog
+	if _, cmd := a.Update(keyMsg("ctrl+c")); cmd == nil || fmt.Sprintf("%T", cmd()) != "tea.QuitMsg" {
+		t.Error("ctrl+c must quit while a dialog is open")
+	}
+	b := newTestApp(t, 140, 38)
+	b.press(":")
+	if _, cmd := b.Update(keyMsg("ctrl+c")); cmd == nil || fmt.Sprintf("%T", cmd()) != "tea.QuitMsg" {
+		t.Error("ctrl+c must quit while the prompt is open")
 	}
 }
 
-func TestSearchModeCapturesKeys(t *testing.T) {
-	a := newTestApp()
-	a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'/'}})
-	if !a.searching {
-		t.Fatal("expected search mode to be active")
+func TestStartupCommandAndStackOptions(t *testing.T) {
+	opt := testOpts()
+	opt.Command = "nodes"
+	a := newTestAppOpts(t, opt, 140, 38)
+	mustContain(t, a.screenText(), "nodes(all)[7]")
+
+	opt = testOpts()
+	opt.Stack = "shop"
+	a = newTestAppOpts(t, opt, 140, 38)
+	mustContain(t, a.screenText(), "services(shop)[5]")
+	if got := a.favStacks(); got[0] != "shop" {
+		t.Errorf("the starting stack should be a favourite, got %v", got)
 	}
 
-	// Typing 'n' in search mode must not switch screens.
-	a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-	if a.screen != screenServices {
-		t.Errorf("screen changed while searching: %v", a.screen)
-	}
-	if a.filter != "n" {
-		t.Errorf("filter = %q, want n", a.filter)
-	}
-
-	// Escape exits search mode and clears the filter.
-	a.handleKey(tea.KeyMsg{Type: tea.KeyEsc})
-	if a.searching {
-		t.Error("search mode should be closed")
-	}
-	if a.filter != "" {
-		t.Errorf("filter = %q, want empty", a.filter)
-	}
+	opt = testOpts()
+	opt.Command, opt.Stack = "tasks", "ci"
+	a = newTestAppOpts(t, opt, 140, 38)
+	mustContain(t, a.screenText(), "tasks(ci)[")
 }
 
-func TestRemoveServiceAsksForConfirmation(t *testing.T) {
-	a := newTestApp()
-	a.applyServices([]api.ServiceRow{svc("id-a", "web", 1, 1)})
-	a.services.SetCursor(0)
-	a.selectedServiceID = "id-a"
-
-	a.handleKey(tea.KeyMsg{Type: tea.KeyCtrlD})
-	if !a.confirm.active {
-		t.Fatal("expected a confirmation prompt before deleting")
-	}
-
-	// Cancelling must close the prompt without acting.
-	a.handleKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-	if a.confirm.active {
-		t.Error("confirmation should be closed after cancelling")
-	}
+func TestCopyNamesFlashes(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	a.press("c")
+	mustContain(t, a.screenText(), "Copied ci_backup to the clipboard")
+	a.press("space", "space")
+	a.press("c")
+	mustContain(t, a.screenText(), "Copied 2 names to the clipboard")
 }
 
-func TestCommandSuggestions(t *testing.T) {
-	a := newTestApp()
-	a.command.open()
-
-	// An empty prompt offers the history, not the resource list.
-	if len(a.command.suggestions) != 0 {
-		t.Fatalf("a fresh prompt should have no suggestions, got %d", len(a.command.suggestions))
+// No two keys of a view may mean different things: a sort hotkey must not
+// shadow an action, and nothing may steal the keys the app itself uses.
+func TestKeyBindingsDoNotCollide(t *testing.T) {
+	reserved := map[string]string{
+		":": "command prompt", "/": "filter", "?": "help", "q": "back", "[": "history", "]": "history", "-": "history",
+		"esc": "back", "ctrl+a": "aliases", "ctrl+e": "header", "ctrl+g": "crumbs", "ctrl+r": "reload", "ctrl+c": "quit",
+		"j": "down", "k": "up", "g": "top", "G": "bottom", "ctrl+f": "page down", "ctrl+b": "page up",
+		"up": "up", "down": "down", "pgup": "page", "pgdown": "page", "home": "top", "end": "bottom",
 	}
-
-	// Typing a prefix suggests the remainder, k9s-style.
-	a.command.input.SetValue("vol")
-	a.command.suggest()
-	if len(a.command.suggestions) != 1 || a.command.suggestions[0] != "ume" {
-		t.Fatalf("suggestions = %v, want [ume]", a.command.suggestions)
-	}
-	if a.command.ghost() != "ume" {
-		t.Errorf("ghost = %q, want ume", a.command.ghost())
-	}
-
-	// Tab accepts the suggestion.
-	a.command.acceptSuggestion()
-	if a.command.input.Value() != "volume" {
-		t.Errorf("after tab: %q, want volume", a.command.input.Value())
-	}
-
-	// A word that matches nothing yields no suggestions.
-	a.command.input.SetValue("zzzznotacommand")
-	a.command.suggest()
-	if len(a.command.suggestions) != 0 {
-		t.Errorf("expected no suggestions, got %d", len(a.command.suggestions))
-	}
-}
-
-func TestViewHistoryNavigation(t *testing.T) {
-	a := newTestApp()
-	a.goTo(screenServices)
-	a.goTo(screenNodes)
-	a.goTo(screenVolumes)
-
-	if _, _ = a.goBack(); a.screen != screenNodes {
-		t.Errorf("after back: screen = %v, want nodes", a.screen)
-	}
-	if _, _ = a.goForward(); a.screen != screenVolumes {
-		t.Errorf("after forward: screen = %v, want volumes", a.screen)
-	}
-	// "-" returns to the newest entry in the history, like k9s' Top().
-	if _, _ = a.goLast(); a.screen != screenVolumes {
-		t.Errorf("after last view: screen = %v, want volumes", a.screen)
-	}
-}
-
-func TestLayoutFitsTerminal(t *testing.T) {
-	a := newTestApp()
-	a.width, a.height = 100, 30
-	a.applyServices([]api.ServiceRow{svc("id-a", "web", 1, 1)})
-	a.screen = screenDetail
-	a.selectedServiceID = "id-a"
-	a.resize()
-
-	view := a.View()
-	lines := 0
-	for _, l := range splitLines(view) {
-		_ = l
-		lines++
-	}
-	if lines > a.height+2 {
-		t.Errorf("view is %d lines tall, terminal is %d", lines, a.height)
-	}
-}
-
-func splitLines(s string) []string {
-	var out []string
-	cur := ""
-	for _, r := range s {
-		if r == '\n' {
-			out = append(out, cur)
-			cur = ""
-			continue
+	a := newTestApp(t, 140, 38)
+	for _, res := range resources {
+		v := newTableView(a, res, loadQuery{})
+		seen := map[string]string{}
+		for _, ac := range v.actions() {
+			if why, bad := reserved[ac.key]; bad && ac.key != "esc" {
+				t.Errorf("%s: %q (%s) is taken by the app (%s)", res.key, ac.key, ac.desc, why)
+			}
+			if len(ac.key) == 1 && ac.key[0] >= '0' && ac.key[0] <= '9' && res.scoped {
+				t.Errorf("%s: digits switch stacks, %q cannot be bound", res.key, ac.key)
+			}
+			if prev, dup := seen[ac.key]; dup && prev != ac.desc {
+				// enter and l may both open logs: only differing meanings are a bug
+				t.Errorf("%s: key %q is both %q and %q", res.key, ac.key, prev, ac.desc)
+			}
+			seen[ac.key] = ac.desc
 		}
-		cur += string(r)
 	}
-	out = append(out, cur)
-	return out
 }
 
-// TestAppDispatchesNavigationToTheTable checks that arrow keys reach the
-// table through the app's key handling, not just the table in isolation.
-func TestAppDispatchesNavigationToTheTable(t *testing.T) {
-	a := newTestApp()
-	a.screen = screenVolumes
-	var rows []api.VolumeRow
-	for i := 0; i < 10; i++ {
-		rows = append(rows, api.VolumeRow{Name: "vol", Driver: "local", Scope: "local", Created: "2025-06-01"})
+func TestAliasesDoesNotStack(t *testing.T) {
+	a := newTestApp(t, 120, 30)
+	a.command("aliases")
+	n := len(a.stack)
+	a.command("aliases")
+	a.command("a")
+	if len(a.stack) != n {
+		t.Fatalf("aliases stacked: %d -> %d", n, len(a.stack))
 	}
-	a.volumes.SetRows(volumeTableRows(rows))
-	a.resize()
-
-	a.handleKey(tea.KeyMsg{Type: tea.KeyDown})
-	a.handleKey(tea.KeyMsg{Type: tea.KeyDown})
-	if got := a.volumes.Cursor(); got != 2 {
-		t.Errorf("cursor = %d, want 2 after two arrow-down presses", got)
-	}
-	a.handleKey(tea.KeyMsg{Type: tea.KeyUp})
-	if got := a.volumes.Cursor(); got != 1 {
-		t.Errorf("cursor = %d, want 1 after arrow-up", got)
+	a.command("help")
+	m := len(a.stack)
+	a.command("help")
+	if len(a.stack) != m {
+		t.Fatalf("help stacked")
 	}
 }

@@ -1,0 +1,24 @@
+Context:  demo [RW]               <0>      all          <e> Edit       <enter> Tasks                                       __    __
+Swarm:    acme-prod (6/7 ready)   <1>      ci           <?> Help       <y>     YAML                                       /  \__/  \  swarm
+Node:     manager-1 (leader)      <2>      monitoring   <l> Logs                                                          \__/  \__/  lens
+SL Rev:   test                    <3>      shop         <r> Restart                                                       /  \__/  \
+Docker:   29.8.2                  <ctrl-d> Delete       <b> Rollback                                                      \__/  \__/
+Services: 12/14                   <d>      Describe     <s> Scale
+Tasks:    28/30
+┌────────────────────────────────────────────────────── services(all)[1] </shop_db> ───────────────────────────────────────────────────────┐
+│ STACK           NAME↑            MODE      ┌─────────────────── <Delete> ───────────────────┐ PORTS          UPDATE                  AGE │
+│ shop            shop_db          replicated│                                                │                                       120d │
+│                                            │           Delete service "shop_db"?            │                                            │
+│                                            │                                                │                                            │
+│                                            │                                                │                                            │
+│                                            │                 Cancel     OK                  │                                            │
+│                                            │                                                │                                            │
+│                                            └────────────────────────────────────────────────┘                                            │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  <services>
+                                                          😎  Viewing services...

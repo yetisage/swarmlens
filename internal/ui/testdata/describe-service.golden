@@ -1,0 +1,30 @@
+Context:  demo [RW]               <c>       Copy                                                                           __    __
+Swarm:    acme-prod (6/7 ready)   <?>       Help                                                                          /  \__/  \  swarm
+Node:     manager-1 (leader)      <n>       Next Match                                                                    \__/  \__/  lens
+SL Rev:   test                    <shift-n> Prev Match                                                                    /  \__/  \
+Docker:   29.8.2                  <f>       Toggle FullScreen                                                             \__/  \__/
+Services: 12/14                   <w>       Toggle Wrap
+Tasks:    28/30
+┌─────────────────────────────────────────────────────────── describe(shop_web) ───────────────────────────────────────────────────────────┐
+│ Name:             shop_web                                                                                                               │
+│ ID:               m5toxth7wcfhiyojrwt4ny5x4                                                                                              │
+│ Stack:            shop                                                                                                                   │
+│ Mode:             replicated                                                                                                             │
+│ Replicas:         4 running, 4 desired                                                                                                   │
+│ Image:            nginx:1.27-alpine                                                                                                      │
+│ Ports:            *:8080->80/tcp                                                                                                         │
+│ Created:          2026-09-28 15:00:00 (41d ago)                                                                                          │
+│ Update Status:    —                                                                                                                      │
+│ Tasks:                                                                                                                                   │
+│   shop_web.1                 running    manager-1                                                                                        │
+│   shop_web.2                 running    manager-2                                                                                        │
+│   shop_web.3                 running    manager-3                                                                                        │
+│   shop_web.4                 running    worker-1                                                                                         │
+│   shop_web.4                 shutdown   worker-3                                                                                         │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  <services>   <describe>
+                                                         😎  Describing shop_web...

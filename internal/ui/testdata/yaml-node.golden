@@ -1,0 +1,30 @@
+Context:  demo [RW]               <c>       Copy                                                                           __    __
+Swarm:    acme-prod (6/7 ready)   <?>       Help                                                                          /  \__/  \  swarm
+Node:     manager-1 (leader)      <n>       Next Match                                                                    \__/  \__/  lens
+SL Rev:   test                    <shift-n> Prev Match                                                                    /  \__/  \
+Docker:   29.8.2                  <f>       Toggle FullScreen                                                             \__/  \__/
+Services: 12/14                   <w>       Toggle Wrap
+Tasks:    28/30
+┌──────────────────────────────────────────────────────────── yaml(manager-1) ─────────────────────────────────────────────────────────────┐
+│ ID: kgeb3vqvgxir4xdoixudjd6r6                                                                                                            │
+│ Hostname: manager-1                                                                                                                      │
+│ Role: manager                                                                                                                            │
+│ Availability: active                                                                                                                     │
+│ Status: ready                                                                                                                            │
+│ Manager: leader                                                                                                                          │
+│ Addr: 10.0.0.11                                                                                                                          │
+│ Engine: 29.8.2                                                                                                                           │
+│ OS: linux                                                                                                                                │
+│ Arch: x86_64                                                                                                                             │
+│ CPUs: 8                                                                                                                                  │
+│ Memory: 34359738368                                                                                                                      │
+│ Tasks: 0                                                                                                                                 │
+│ CPUReserved: 0                                                                                                                           │
+│ MemReserved: 0                                                                                                                           │
+│ Labels:                                                                                                                                  │
+│   zone: a                                                                                                                                │
+│ Created: "2026-04-10T15:00:00Z"                                                                                                          │
+│                                                                                                                                          │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  <nodes>   <yaml>
+                                                      😎  Viewing YAML of manager-1...

@@ -1,0 +1,30 @@
+Context:  demo [RW]               <0>      all          <e> Edit       <enter> Tasks                                                                                                   __    __
+Swarm:    acme-prod (6/7 ready)   <1>      ci           <?> Help       <y>     YAML                                                                                                   /  \__/  \  swarm
+Node:     manager-1 (leader)      <2>      monitoring   <l> Logs                                                                                                                      \__/  \__/  lens
+SL Rev:   test                    <3>      shop         <r> Restart                                                                                                                   /  \__/  \
+Docker:   29.8.2                  <ctrl-d> Delete       <b> Rollback                                                                                                                  \__/  \__/
+Services: 12/14                   <d>      Describe     <s> Scale
+Tasks:    28/30
+┌───────────────────────────────────────────────────────────────────────────────────────── services(all)[14] ──────────────────────────────────────────────────────────────────────────────────────────┐
+│ STACK       NAME↑                     MODE             REPLICAS  IMAGE                                    PORTS                         UPDATE     AGE  ID            CONSTRAINTS            UPDATED │
+│ ci          ci_backup                 replicated-job  0/1 (1/1)  acme/backup:3.2                                                                    9h  qctjv4l4c3jo                            3h0m │
+│ ci          ci_legacy                 replicated            0/0  acme/legacy-ci:1.0                                                               300d  5fmbn27e6o5l                            100d │
+│ ci          ci_runner                 replicated            2/3  gitlab/gitlab-runner:v17.5.0                                           updating   19d  vwqz2wqpapsf                            6d8h │
+│ monitoring  monitoring_cadvisor       global                5/5  gcr.io/cadvisor/cadvisor:v0.49.1                                                  77d  u4opyumjvl24                             25d │
+│ monitoring  monitoring_grafana        replicated            1/1  grafana/grafana:11.2.0                   *:3000->3000/tcp                         77d  mccvblzxok25                             25d │
+│ monitoring  monitoring_node-exporter  global                5/5  quay.io/prometheus/node-exporter:v1.8.2                                           77d  mklgmfuovcqu                             25d │
+│ monitoring  monitoring_prometheus     replicated            1/1  prom/prometheus:v2.54.1                  *:9090->9090/tcp                         77d  ontdeyywgjhi  node.role==manager         25d │
+│             registry                  replicated            1/1  registry:2                               *:5000->5000/tcp                        200d  rmxmicsmgcic                             66d │
+│ shop        shop_api                  replicated            3/3  ghcr.io/acme/shop-api:2.4.1                                                       41d  isc4a5zjzhob  node.role==worker          13d │
+│ shop        shop_cache                replicated            1/1  redis:7.4-alpine                                                                 120d  6dop7gu5hjjt                             40d │
+│ shop        shop_db                   replicated            1/1  postgres:16.4                                                                    120d  nvfgctkljzgq  node.labels.db==true       40d │
+│ shop        shop_web                  replicated            4/4  nginx:1.27-alpine                        *:8080->80/tcp                           41d  m5toxth7wcfh                             13d │
+│ shop        shop_worker               replicated            1/2  ghcr.io/acme/shop-worker:2.4.1                                                    41d  ixkxqn62x5hb                             13d │
+│             traefik                   global                3/3  traefik:v3.1                             *:80->80/tcp, *:443->443/tcp            150d  kyyd64pcpoe7  node.role==manager         50d │
+│                                                                                                                                                                                                      │
+│                                                                                                                                                                                                      │
+│                                                                                                                                                                                                      │
+│                                                                                                                                                                                                      │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  <services>
+                                                                                        😎  Viewing services...

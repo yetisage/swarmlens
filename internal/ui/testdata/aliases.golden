@@ -1,0 +1,24 @@
+Context:  demo [RW]               <enter> Goto                                                                             __    __
+Swarm:    acme-prod (6/7 ready)   <?>     Help                                                                            /  \__/  \  swarm
+Node:     manager-1 (leader)                                                                                              \__/  \__/  lens
+SL Rev:   test                                                                                                            /  \__/  \
+Docker:   29.8.2                                                                                                          \__/  \__/
+Services: 12/14
+Tasks:    28/30
+┌──────────────────────────────────────────────────────────── aliases(all)[13] ────────────────────────────────────────────────────────────┐
+│ RESOURCE↑                                                     COMMAND                                                                    │
+│ aliases                                                       a alias aliases                                                            │
+│ configs                                                       cfg conf config configs                                                    │
+│ contexts                                                      context contexts ctx                                                       │
+│ events                                                        ev event events                                                            │
+│ help                                                          ? h help                                                                   │
+│ networks                                                      net network networks nw                                                    │
+│ nodes                                                         nd no node nodes                                                           │
+│ quit                                                          exit q q! qa quit                                                          │
+│ secrets                                                       sec secret secrets                                                         │
+│ services                                                      service services srv svc                                                   │
+│ stacks                                                        st stack stacks                                                            │
+│ tasks                                                         ps task tasks tk                                                           │
+└──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────┘
+  <services>   <aliases>
+                                                          😎  Viewing services...
