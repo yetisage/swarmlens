@@ -17,10 +17,12 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/moby/moby/api/types/swarm"
 	"github.com/moby/moby/client"
+	"github.com/moby/moby/client/pkg/versions"
 )
 
 // API is the Docker Engine implementation of Backend.
@@ -30,6 +32,8 @@ type API struct {
 	endpoint string
 
 	reconnect backoffPolicy // how the event stream reconnects
+
+	negotiated atomic.Bool // the API version has been agreed with the daemon
 
 	mu          sync.RWMutex
 	nodeNames   map[string]string // node id -> hostname
@@ -224,8 +228,40 @@ func (a *API) ContextName() string { return a.ctxName }
 // Endpoint implements Backend.
 func (a *API) Endpoint() string { return a.endpoint }
 
+// The oldest daemon swarmlens works with. The running count of a service, which
+// the services view and the header show, comes from the service status that the
+// engine reports from API 1.41, Docker Engine 20.10; the client itself goes down
+// to API 1.40. The README says the same.
+const (
+	minAPIVersion   = "1.41"
+	minDockerEngine = "20.10"
+)
+
+// negotiate agrees an API version with the daemon before the first request and
+// refuses a daemon that is older than swarmlens works with. The client
+// negotiates by itself, but for a daemon older than it supports it keeps quiet
+// and carries on with its newest version, which that daemon rejects with an
+// error that does not say why. Any other trouble with the ping is left to the
+// request that follows, which reports it as it always has.
+func (a *API) negotiate(ctx context.Context) error {
+	if a.negotiated.Load() {
+		return nil
+	}
+	res, err := a.cli.Ping(ctx, client.PingOptions{NegotiateAPIVersion: true})
+	if res.APIVersion != "" && versions.LessThan(res.APIVersion, minAPIVersion) {
+		return fmt.Errorf("swarmlens needs Docker Engine %s or newer: this daemon speaks API %s, the minimum is %s", minDockerEngine, res.APIVersion, minAPIVersion)
+	}
+	if err == nil {
+		a.negotiated.Store(true)
+	}
+	return nil
+}
+
 // Summary implements Backend.
 func (a *API) Summary(ctx context.Context) (*Summary, error) {
+	if err := a.negotiate(ctx); err != nil {
+		return nil, err
+	}
 	res, err := a.cli.Info(ctx, client.InfoOptions{})
 	if err != nil {
 		return nil, err
