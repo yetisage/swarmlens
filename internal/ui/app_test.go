@@ -841,3 +841,78 @@ func TestAliasesDoesNotStack(t *testing.T) {
 		t.Fatalf("help stacked")
 	}
 }
+
+// Whatever -c asks for, the program must come up with a view to stand on.
+// help, aliases, a typo and a context switch cannot be the root themselves:
+// they run on top of the default view, as k9s falls back to its default.
+func TestEveryStartCommandLeavesAView(t *testing.T) {
+	cases := []struct {
+		cmd       string
+		root, top string // crumbs
+		modal     bool   // an error dialog is open
+	}{
+		{"", "services", "services", false},
+		{"services", "services", "services", false},
+		{"svc shop", "services", "services", false},
+		{"nodes", "nodes", "nodes", false},
+		{"events", "events", "events", false},
+		{"help", "services", "help", false},
+		{"?", "services", "help", false},
+		{"aliases", "services", "aliases", false},
+		{"a", "services", "aliases", false},
+		{"nosuchcommand", "services", "services", true},
+		{"nosuchcommand shop", "services", "services", true},
+		{"ctx lab", "services", "services", false},
+	}
+	for _, c := range cases {
+		t.Run(c.cmd, func(t *testing.T) {
+			opt := testOpts()
+			opt.Command = c.cmd
+			a := New(opt)
+			a.w, a.h = 140, 38
+			a.drain(a.Init())
+			if len(a.stack) == 0 {
+				t.Fatal("no view after Init")
+			}
+			if got := a.stack[0].crumb(); got != c.root {
+				t.Errorf("root view = %q, want %q", got, c.root)
+			}
+			if got := a.view().crumb(); got != c.top {
+				t.Errorf("top view = %q, want %q", got, c.top)
+			}
+			if (a.modal != nil) != c.modal {
+				t.Errorf("error dialog open = %v, want %v", a.modal != nil, c.modal)
+			}
+			// what arrives after the start must be harmless
+			for _, m := range []tea.Msg{tickMsg{}, summaryTick{}, refreshMsg{}, actionMsg{msg: "x"}, execDoneMsg{}} {
+				a.Update(m)
+			}
+			_ = a.screenText()
+		})
+	}
+
+	t.Run("ctx lab switches the context", func(t *testing.T) {
+		opt := testOpts()
+		opt.Command = "ctx lab"
+		a := New(opt)
+		a.w, a.h = 140, 38
+		a.drain(a.Init())
+		if a.be.ContextName() != "lab" {
+			t.Errorf("context = %q, want lab", a.be.ContextName())
+		}
+	})
+}
+
+// The messages that keep arriving (ticks, results of actions) must survive an
+// app that has no view yet.
+func TestMessagesAreHarmlessWithoutAView(t *testing.T) {
+	a := New(testOpts())
+	a.w, a.h = 140, 38
+	for _, m := range []tea.Msg{tickMsg{}, summaryTick{}, refreshMsg{}, actionMsg{msg: "x"}, actionMsg{err: fmt.Errorf("boom")}, execDoneMsg{}, execDoneMsg{err: fmt.Errorf("boom")}} {
+		a.Update(m)
+	}
+	a.press("esc", ":", "?", "ctrl+r")
+	if s := a.screenText(); !strings.Contains(s, "Revision") {
+		t.Errorf("expected the splash screen, got:\n%s", s)
+	}
+}

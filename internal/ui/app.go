@@ -223,7 +223,7 @@ func (a *app) after(d time.Duration, msg tea.Msg) tea.Cmd {
 func (a *app) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		a.loadSummary(),
-		a.runCommand(a.startCommand(), true),
+		a.startView(),
 		a.after(a.refreshEvery, tickMsg{}),
 		a.after(summaryEvery, summaryTick{}),
 		a.startEvents(),
@@ -237,12 +237,35 @@ func (a *app) Init() tea.Cmd {
 func (a *app) startCommand() string {
 	cmd := a.opt.Command
 	if cmd == "" {
-		cmd = "services"
+		cmd = a.defaultCommand()
 	}
 	if a.opt.Stack != "" && !strings.Contains(cmd, " ") {
 		cmd += " " + a.opt.Stack
 	}
 	return cmd
+}
+
+// defaultCommand is the view the program opens when nothing else is asked
+// for, and the one it falls back to.
+func (a *app) defaultCommand() string {
+	if a.opt.Stack != "" {
+		return "services " + a.opt.Stack
+	}
+	return "services"
+}
+
+// startView opens the view the program starts in and guarantees that the
+// stack is not empty afterwards. A start command that cannot be the root of
+// the stack (help, aliases, a context switch, a typo) runs on top of the
+// default view, which is how k9s falls back when -c names something it
+// cannot show.
+func (a *app) startView() tea.Cmd {
+	line := a.startCommand()
+	if a.commandOpensView(line) {
+		return a.runCommand(line, true)
+	}
+	root := a.runCommand(a.defaultCommand(), false)
+	return tea.Batch(root, a.runCommand(line, true))
 }
 
 func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -284,14 +307,14 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, a.onEvent(m.ev)
 
 	case tickMsg:
-		return a, tea.Batch(a.view().refresh(), a.after(a.refreshEvery, tickMsg{}))
+		return a, tea.Batch(a.refreshTop(), a.after(a.refreshEvery, tickMsg{}))
 
 	case summaryTick:
 		return a, tea.Batch(a.loadSummary(), a.after(summaryEvery, summaryTick{}))
 
 	case refreshMsg:
 		a.eventPending = false
-		return a, tea.Batch(a.view().refresh(), a.loadSummary())
+		return a, tea.Batch(a.refreshTop(), a.loadSummary())
 
 	case flashEnd:
 		return a, nil // View checks the clock; this just forces a repaint
@@ -302,13 +325,13 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		} else if m.msg != "" {
 			a.flash(flashInfo, m.msg)
 		}
-		return a, tea.Batch(a.view().refresh(), a.loadSummary())
+		return a, tea.Batch(a.refreshTop(), a.loadSummary())
 
 	case execDoneMsg:
 		if m.err != nil {
 			a.flash(flashErr, fmt.Sprintf("%s: %v", m.what, m.err))
 		}
-		return a, a.view().refresh()
+		return a, a.refreshTop()
 
 	case switchedMsg:
 		return a, a.onSwitched(m)
@@ -322,8 +345,26 @@ func (a *app) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, nil
 }
 
-// view is the top of the stack.
+// view is the top of the stack. Once the program has started the stack is
+// never empty (see startView); code that can run before that, or in answer to
+// a message that arrives regardless, uses top instead.
 func (a *app) view() view { return a.stack[len(a.stack)-1] }
+
+// top is the top of the stack, or nil when there is none yet.
+func (a *app) top() view {
+	if len(a.stack) == 0 {
+		return nil
+	}
+	return a.view()
+}
+
+// refreshTop reloads the top view, if there is one.
+func (a *app) refreshTop() tea.Cmd {
+	if v := a.top(); v != nil {
+		return v.refresh()
+	}
+	return nil
+}
 
 func (a *app) push(v view) tea.Cmd {
 	a.stack = append(a.stack, v)
@@ -473,8 +514,7 @@ func (a *app) loadSync() {
 	if s, err := a.be.Summary(ctx); err == nil {
 		a.summary = s
 	}
-	cmd := a.runCommand(a.startCommand(), true)
-	a.drain(cmd)
+	a.drain(a.startView())
 }
 
 // drain runs a command and feeds its messages back, recursively, ignoring
