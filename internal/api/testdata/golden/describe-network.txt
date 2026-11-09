@@ -1,0 +1,17 @@
+Name:             shop_back
+ID:               qdvzpywjn24d3kejbx821bzzp
+Stack:            shop
+Driver:           overlay
+Scope:            swarm
+Internal:         false
+Attachable:       false
+Ingress:          false
+IPv6:             false
+Subnet:           10.0.1.0/24  gateway 10.0.1.1
+Options:          com.docker.network.driver.overlay.vxlanid_list=4097
+Labels:           com.docker.stack.namespace=shop
+Created:          2026-11-09 14:25:27 UTC (34m ago)
+Containers:
+  shop_api.1.srmnarz81809ylrvax20qsegy     10.0.1.3/24
+  shop_api.2.g3i01cu8gkw4mkhk3m0xhcapu     10.0.1.4/24
+  shop_back-endpoint                       10.0.1.5/24

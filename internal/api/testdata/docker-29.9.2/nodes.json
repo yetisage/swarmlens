@@ -1,0 +1,104 @@
+[
+  {
+    "CreatedAt": "2026-11-09T14:25:25.51992342Z",
+    "Description": {
+      "Engine": {
+        "EngineVersion": "29.9.2",
+        "Plugins": [
+          {
+            "Name": "awslogs",
+            "Type": "Log"
+          },
+          {
+            "Name": "fluentd",
+            "Type": "Log"
+          },
+          {
+            "Name": "gcplogs",
+            "Type": "Log"
+          },
+          {
+            "Name": "gelf",
+            "Type": "Log"
+          },
+          {
+            "Name": "journald",
+            "Type": "Log"
+          },
+          {
+            "Name": "json-file",
+            "Type": "Log"
+          },
+          {
+            "Name": "local",
+            "Type": "Log"
+          },
+          {
+            "Name": "splunk",
+            "Type": "Log"
+          },
+          {
+            "Name": "syslog",
+            "Type": "Log"
+          },
+          {
+            "Name": "bridge",
+            "Type": "Network"
+          },
+          {
+            "Name": "host",
+            "Type": "Network"
+          },
+          {
+            "Name": "ipvlan",
+            "Type": "Network"
+          },
+          {
+            "Name": "macvlan",
+            "Type": "Network"
+          },
+          {
+            "Name": "null",
+            "Type": "Network"
+          },
+          {
+            "Name": "overlay",
+            "Type": "Network"
+          },
+          {
+            "Name": "local",
+            "Type": "Volume"
+          }
+        ]
+      },
+      "Hostname": "vm",
+      "Platform": {
+        "Architecture": "x86_64",
+        "OS": "linux"
+      },
+      "Resources": {
+        "MemoryBytes": 16867737600,
+        "NanoCPUs": 4000000000
+      }
+    },
+    "ID": "okf0nzz6onffdvoim55yqcrhr",
+    "ManagerStatus": {
+      "Addr": "127.0.0.1:2377",
+      "Leader": true,
+      "Reachability": "reachable"
+    },
+    "Spec": {
+      "Availability": "active",
+      "Labels": {},
+      "Role": "manager"
+    },
+    "Status": {
+      "Addr": "127.0.0.1",
+      "State": "ready"
+    },
+    "UpdatedAt": "2026-11-09T14:25:28.28265843Z",
+    "Version": {
+      "Index": 29
+    }
+  }
+]

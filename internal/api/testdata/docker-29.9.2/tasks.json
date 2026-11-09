@@ -1,0 +1,541 @@
+[
+  {
+    "CreatedAt": "2026-11-09T14:25:28.908782889Z",
+    "DesiredState": "running",
+    "ID": "3m88e7h2adgnz5tyz7ffmxdq6",
+    "Labels": {},
+    "NodeID": "okf0nzz6onffdvoim55yqcrhr",
+    "ServiceID": "tgxlmpmvlc3dqdhzr7sozp46l",
+    "Slot": 1,
+    "Spec": {
+      "ContainerSpec": {
+        "DNSConfig": {},
+        "Image": "hello:1",
+        "Init": false,
+        "Isolation": "default"
+      },
+      "ForceUpdate": 0,
+      "Placement": {},
+      "Resources": {
+        "Limits": {
+          "MemoryBytes": 67108864
+        },
+        "Reservations": {}
+      }
+    },
+    "Status": {
+      "ContainerStatus": {
+        "ContainerID": "cb2e1fa407537c9897780093dbd1ab9682239406d23581c4ee9492fa1adcfed9",
+        "ExitCode": 0,
+        "PID": 8366
+      },
+      "Message": "started",
+      "PortStatus": {},
+      "State": "running",
+      "Timestamp": "2026-11-09T14:25:29.94004209Z"
+    },
+    "UpdatedAt": "2026-11-09T14:25:29.992591699Z",
+    "Version": {
+      "Index": 48
+    },
+    "Volumes": null
+  },
+  {
+    "CreatedAt": "2026-11-09T14:25:28.959678435Z",
+    "DesiredState": "shutdown",
+    "ID": "cv6hnf2zobka9r9mhrds94c6b",
+    "Labels": {},
+    "NodeID": "okf0nzz6onffdvoim55yqcrhr",
+    "ServiceID": "jvwk522eh1e6p6znovhll08pg",
+    "Slot": 1,
+    "Spec": {
+      "ContainerSpec": {
+        "DNSConfig": {},
+        "Image": "no-such-registry.invalid/ghost:1",
+        "Init": false,
+        "Isolation": "default"
+      },
+      "ForceUpdate": 0,
+      "Placement": {},
+      "Resources": {
+        "Limits": {},
+        "Reservations": {}
+      },
+      "RestartPolicy": {
+        "Condition": "none",
+        "Delay": 5000000000,
+        "MaxAttempts": 0
+      }
+    },
+    "Status": {
+      "ContainerStatus": {
+        "ContainerID": "",
+        "ExitCode": 0,
+        "PID": 0
+      },
+      "Err": "Get \"https://no-such-registry.invalid/v2/\": Forbidden",
+      "Message": "preparing",
+      "PortStatus": {},
+      "State": "rejected",
+      "Timestamp": "2026-11-09T14:25:29.415308938Z"
+    },
+    "UpdatedAt": "2026-11-09T14:25:29.687733786Z",
+    "Version": {
+      "Index": 46
+    },
+    "Volumes": null
+  },
+  {
+    "CreatedAt": "2026-11-09T14:25:27.465106371Z",
+    "DesiredState": "running",
+    "ID": "g3i01cu8gkw4mkhk3m0xhcapu",
+    "Labels": {},
+    "NetworksAttachments": [
+      {
+        "Addresses": [
+          "10.0.0.5/24"
+        ],
+        "Network": {
+          "CreatedAt": "2026-11-09T14:25:25.51996551Z",
+          "DriverState": {
+            "Name": "overlay",
+            "Options": {
+              "com.docker.network.driver.overlay.vxlanid_list": "4096"
+            }
+          },
+          "ID": "cj7hitan8y0di3k3ffd76lkdq",
+          "IPAMOptions": {
+            "Configs": [
+              {
+                "Gateway": "10.0.0.1",
+                "Subnet": "10.0.0.0/24"
+              }
+            ],
+            "Driver": {
+              "Name": "default"
+            }
+          },
+          "Spec": {
+            "DriverConfiguration": {},
+            "IPAMOptions": {
+              "Driver": {}
+            },
+            "Ingress": true,
+            "Labels": {},
+            "Name": "ingress",
+            "Scope": "swarm"
+          },
+          "UpdatedAt": "2026-11-09T14:25:25.523213216Z",
+          "Version": {
+            "Index": 5
+          }
+        }
+      },
+      {
+        "Addresses": [
+          "10.0.1.4/24"
+        ],
+        "Network": {
+          "CreatedAt": "2026-11-09T14:25:26.554355619Z",
+          "DriverState": {
+            "Name": "overlay",
+            "Options": {
+              "com.docker.network.driver.overlay.vxlanid_list": "4097"
+            }
+          },
+          "ID": "qdvzpywjn24d3kejbx821bzzp",
+          "IPAMOptions": {
+            "Configs": [
+              {
+                "Gateway": "10.0.1.1",
+                "Subnet": "10.0.1.0/24"
+              }
+            ],
+            "Driver": {
+              "Name": "default"
+            }
+          },
+          "Spec": {
+            "DriverConfiguration": {
+              "Name": "overlay"
+            },
+            "Labels": {
+              "com.docker.stack.namespace": "shop"
+            },
+            "Name": "shop_back",
+            "Scope": "swarm"
+          },
+          "UpdatedAt": "2026-11-09T14:25:26.555084952Z",
+          "Version": {
+            "Index": 12
+          }
+        }
+      }
+    ],
+    "NodeID": "okf0nzz6onffdvoim55yqcrhr",
+    "ServiceID": "vkjc6op8n20dyl0dtuyxf85hd",
+    "Slot": 2,
+    "Spec": {
+      "ContainerSpec": {
+        "Configs": [
+          {
+            "ConfigID": "a0jwejgoy9v9rabmou6keh46b",
+            "ConfigName": "shop_appcfg",
+            "File": {
+              "GID": "0",
+              "Mode": 292,
+              "Name": "appcfg",
+              "UID": "0"
+            }
+          }
+        ],
+        "Env": [
+          "ESC=pwn",
+          "TOKEN=abc123"
+        ],
+        "Image": "hello:1",
+        "Isolation": "default",
+        "Labels": {
+          "com.docker.stack.namespace": "shop"
+        },
+        "Privileges": {
+          "CredentialSpec": null,
+          "NoNewPrivileges": false,
+          "SELinuxContext": null
+        },
+        "Secrets": [
+          {
+            "File": {
+              "GID": "0",
+              "Mode": 292,
+              "Name": "dbpass",
+              "UID": "0"
+            },
+            "SecretID": "fvjofjf7xctq1i0yy21uh9wbo",
+            "SecretName": "shop_dbpass"
+          }
+        ]
+      },
+      "ForceUpdate": 0,
+      "Networks": [
+        {
+          "Aliases": [
+            "api"
+          ],
+          "Target": "qdvzpywjn24d3kejbx821bzzp"
+        }
+      ],
+      "Placement": {},
+      "Resources": {}
+    },
+    "Status": {
+      "ContainerStatus": {
+        "ContainerID": "f5241955ce33245132eaaaf634f61448b59d06c77be54e58b26df7cfebfe7723",
+        "ExitCode": 0,
+        "PID": 8169
+      },
+      "Message": "started",
+      "PortStatus": {},
+      "State": "running",
+      "Timestamp": "2026-11-09T14:25:28.899925705Z"
+    },
+    "UpdatedAt": "2026-11-09T14:25:28.978245161Z",
+    "Version": {
+      "Index": 39
+    },
+    "Volumes": null
+  },
+  {
+    "CreatedAt": "2026-11-09T14:25:28.908827075Z",
+    "DesiredState": "running",
+    "ID": "p94ydz94wrgxl5242h27ujoot",
+    "Labels": {},
+    "NodeID": "okf0nzz6onffdvoim55yqcrhr",
+    "ServiceID": "tgxlmpmvlc3dqdhzr7sozp46l",
+    "Slot": 2,
+    "Spec": {
+      "ContainerSpec": {
+        "DNSConfig": {},
+        "Image": "hello:1",
+        "Init": false,
+        "Isolation": "default"
+      },
+      "ForceUpdate": 0,
+      "Placement": {},
+      "Resources": {
+        "Limits": {
+          "MemoryBytes": 67108864
+        },
+        "Reservations": {}
+      }
+    },
+    "Status": {
+      "ContainerStatus": {
+        "ContainerID": "e511e3cb30145770736b0db33c05d79e51d720b1f7a60356e55215b13406c5ae",
+        "ExitCode": 0,
+        "PID": 8387
+      },
+      "Message": "started",
+      "PortStatus": {},
+      "State": "running",
+      "Timestamp": "2026-11-09T14:25:29.944449879Z"
+    },
+    "UpdatedAt": "2026-11-09T14:25:29.992457823Z",
+    "Version": {
+      "Index": 48
+    },
+    "Volumes": null
+  },
+  {
+    "CreatedAt": "2026-11-09T14:25:27.465029803Z",
+    "DesiredState": "running",
+    "ID": "srmnarz81809ylrvax20qsegy",
+    "Labels": {},
+    "NetworksAttachments": [
+      {
+        "Addresses": [
+          "10.0.0.4/24"
+        ],
+        "Network": {
+          "CreatedAt": "2026-11-09T14:25:25.51996551Z",
+          "DriverState": {
+            "Name": "overlay",
+            "Options": {
+              "com.docker.network.driver.overlay.vxlanid_list": "4096"
+            }
+          },
+          "ID": "cj7hitan8y0di3k3ffd76lkdq",
+          "IPAMOptions": {
+            "Configs": [
+              {
+                "Gateway": "10.0.0.1",
+                "Subnet": "10.0.0.0/24"
+              }
+            ],
+            "Driver": {
+              "Name": "default"
+            }
+          },
+          "Spec": {
+            "DriverConfiguration": {},
+            "IPAMOptions": {
+              "Driver": {}
+            },
+            "Ingress": true,
+            "Labels": {},
+            "Name": "ingress",
+            "Scope": "swarm"
+          },
+          "UpdatedAt": "2026-11-09T14:25:25.523213216Z",
+          "Version": {
+            "Index": 5
+          }
+        }
+      },
+      {
+        "Addresses": [
+          "10.0.1.3/24"
+        ],
+        "Network": {
+          "CreatedAt": "2026-11-09T14:25:26.554355619Z",
+          "DriverState": {
+            "Name": "overlay",
+            "Options": {
+              "com.docker.network.driver.overlay.vxlanid_list": "4097"
+            }
+          },
+          "ID": "qdvzpywjn24d3kejbx821bzzp",
+          "IPAMOptions": {
+            "Configs": [
+              {
+                "Gateway": "10.0.1.1",
+                "Subnet": "10.0.1.0/24"
+              }
+            ],
+            "Driver": {
+              "Name": "default"
+            }
+          },
+          "Spec": {
+            "DriverConfiguration": {
+              "Name": "overlay"
+            },
+            "Labels": {
+              "com.docker.stack.namespace": "shop"
+            },
+            "Name": "shop_back",
+            "Scope": "swarm"
+          },
+          "UpdatedAt": "2026-11-09T14:25:26.555084952Z",
+          "Version": {
+            "Index": 12
+          }
+        }
+      }
+    ],
+    "NodeID": "okf0nzz6onffdvoim55yqcrhr",
+    "ServiceID": "vkjc6op8n20dyl0dtuyxf85hd",
+    "Slot": 1,
+    "Spec": {
+      "ContainerSpec": {
+        "Configs": [
+          {
+            "ConfigID": "a0jwejgoy9v9rabmou6keh46b",
+            "ConfigName": "shop_appcfg",
+            "File": {
+              "GID": "0",
+              "Mode": 292,
+              "Name": "appcfg",
+              "UID": "0"
+            }
+          }
+        ],
+        "Env": [
+          "ESC=pwn",
+          "TOKEN=abc123"
+        ],
+        "Image": "hello:1",
+        "Isolation": "default",
+        "Labels": {
+          "com.docker.stack.namespace": "shop"
+        },
+        "Privileges": {
+          "CredentialSpec": null,
+          "NoNewPrivileges": false,
+          "SELinuxContext": null
+        },
+        "Secrets": [
+          {
+            "File": {
+              "GID": "0",
+              "Mode": 292,
+              "Name": "dbpass",
+              "UID": "0"
+            },
+            "SecretID": "fvjofjf7xctq1i0yy21uh9wbo",
+            "SecretName": "shop_dbpass"
+          }
+        ]
+      },
+      "ForceUpdate": 0,
+      "Networks": [
+        {
+          "Aliases": [
+            "api"
+          ],
+          "Target": "qdvzpywjn24d3kejbx821bzzp"
+        }
+      ],
+      "Placement": {},
+      "Resources": {}
+    },
+    "Status": {
+      "ContainerStatus": {
+        "ContainerID": "66863b4cdc01d6071ac84829bebba9fe82926ae12918ba1b50e329162d414ac2",
+        "ExitCode": 0,
+        "PID": 8115
+      },
+      "Message": "started",
+      "PortStatus": {},
+      "State": "running",
+      "Timestamp": "2026-11-09T14:25:28.783859435Z"
+    },
+    "UpdatedAt": "2026-11-09T14:25:28.876651504Z",
+    "Version": {
+      "Index": 32
+    },
+    "Volumes": null
+  },
+  {
+    "CreatedAt": "2026-11-09T14:25:28.229059746Z",
+    "DesiredState": "running",
+    "ID": "wtbvtcwyl24lrn4tg149vapcb",
+    "Labels": {},
+    "NetworksAttachments": [
+      {
+        "Addresses": [
+          "10.0.2.3/24"
+        ],
+        "Network": {
+          "CreatedAt": "2026-11-09T14:25:26.556003481Z",
+          "DriverState": {
+            "Name": "overlay",
+            "Options": {
+              "com.docker.network.driver.overlay.vxlanid_list": "4098"
+            }
+          },
+          "ID": "q171fv57n55y62nbhavgr9dji",
+          "IPAMOptions": {
+            "Configs": [
+              {
+                "Gateway": "10.0.2.1",
+                "Subnet": "10.0.2.0/24"
+              }
+            ],
+            "Driver": {
+              "Name": "default"
+            }
+          },
+          "Spec": {
+            "DriverConfiguration": {
+              "Name": "overlay"
+            },
+            "Labels": {
+              "com.docker.stack.namespace": "shop"
+            },
+            "Name": "shop_default",
+            "Scope": "swarm"
+          },
+          "UpdatedAt": "2026-11-09T14:25:26.556495225Z",
+          "Version": {
+            "Index": 14
+          }
+        }
+      }
+    ],
+    "NodeID": "okf0nzz6onffdvoim55yqcrhr",
+    "ServiceID": "82v0900b71i9ew2hjfrjq69v1",
+    "Slot": 1,
+    "Spec": {
+      "ContainerSpec": {
+        "Image": "hello:1",
+        "Isolation": "default",
+        "Labels": {
+          "com.docker.stack.namespace": "shop"
+        },
+        "Privileges": {
+          "CredentialSpec": null,
+          "NoNewPrivileges": false,
+          "SELinuxContext": null
+        }
+      },
+      "ForceUpdate": 0,
+      "Networks": [
+        {
+          "Aliases": [
+            "worker"
+          ],
+          "Target": "q171fv57n55y62nbhavgr9dji"
+        }
+      ],
+      "Placement": {},
+      "Resources": {}
+    },
+    "Status": {
+      "ContainerStatus": {
+        "ContainerID": "654f6e8f8a58489570f3b0455b1aa2d70622611b78296ff5882334e07bcf465d",
+        "ExitCode": 0,
+        "PID": 8286
+      },
+      "Message": "started",
+      "PortStatus": {},
+      "State": "running",
+      "Timestamp": "2026-11-09T14:25:29.370582056Z"
+    },
+    "UpdatedAt": "2026-11-09T14:25:29.383781926Z",
+    "Version": {
+      "Index": 43
+    },
+    "Volumes": null
+  }
+]

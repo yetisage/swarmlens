@@ -1,0 +1,15 @@
+Name:             shop_api.2
+ID:               g3i01cu8gkw4mkhk3m0xhcapu
+Service:          shop_api
+Stack:            shop
+Node:             vm
+Slot:             2
+Image:            hello:1
+Desired State:    running
+State:            running (since 34m ago)
+Message:          started
+Container ID:     f5241955ce33245132eaaaf634f61448b59d06c77be54e58b26df7cfebfe7723
+Networks:         ingress 10.0.0.5/24
+                  shop_back 10.0.1.4/24
+Created:          2026-11-09 14:25:27 UTC (34m ago)
+Updated:          2026-11-09 14:25:28 UTC (34m ago)

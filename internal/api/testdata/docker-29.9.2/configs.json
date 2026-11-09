@@ -1,0 +1,17 @@
+[
+  {
+    "CreatedAt": "2026-11-09T14:25:26.561315948Z",
+    "ID": "a0jwejgoy9v9rabmou6keh46b",
+    "Spec": {
+      "Data": "a2V5PXZhbHVlCg==",
+      "Labels": {
+        "com.docker.stack.namespace": "shop"
+      },
+      "Name": "shop_appcfg"
+    },
+    "UpdatedAt": "2026-11-09T14:25:26.561315948Z",
+    "Version": {
+      "Index": 16
+    }
+  }
+]

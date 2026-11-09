@@ -1,0 +1,75 @@
+CreatedAt: "2026-11-09T14:25:27.464300132Z"
+Endpoint:
+  Ports:
+    - Protocol: tcp
+      PublishMode: ingress
+      PublishedPort: 8080
+      TargetPort: 80
+  Spec:
+    Mode: vip
+    Ports:
+      - Protocol: tcp
+        PublishMode: ingress
+        PublishedPort: 8080
+        TargetPort: 80
+  VirtualIPs:
+    - Addr: 10.0.0.3/24
+      NetworkID: cj7hitan8y0di3k3ffd76lkdq
+    - Addr: 10.0.1.2/24
+      NetworkID: qdvzpywjn24d3kejbx821bzzp
+ID: vkjc6op8n20dyl0dtuyxf85hd
+Spec:
+  EndpointSpec:
+    Mode: vip
+    Ports:
+      - Protocol: tcp
+        PublishMode: ingress
+        PublishedPort: 8080
+        TargetPort: 80
+  Labels:
+    com.docker.stack.image: hello:1
+    com.docker.stack.namespace: shop
+  Mode:
+    Replicated:
+      Replicas: 2
+  Name: shop_api
+  TaskTemplate:
+    ContainerSpec:
+      Configs:
+        - ConfigID: a0jwejgoy9v9rabmou6keh46b
+          ConfigName: shop_appcfg
+          File:
+            GID: "0"
+            Mode: 292
+            Name: appcfg
+            UID: "0"
+      Env:
+        - ESC=pwn
+        - TOKEN=abc123
+      Image: hello:1
+      Isolation: default
+      Labels:
+        com.docker.stack.namespace: shop
+      Privileges:
+        CredentialSpec: null
+        NoNewPrivileges: false
+        SELinuxContext: null
+      Secrets:
+        - File:
+            GID: "0"
+            Mode: 292
+            Name: dbpass
+            UID: "0"
+          SecretID: fvjofjf7xctq1i0yy21uh9wbo
+          SecretName: shop_dbpass
+    ForceUpdate: 0
+    Networks:
+      - Aliases:
+          - api
+        Target: qdvzpywjn24d3kejbx821bzzp
+    Placement: {}
+    Resources: {}
+    Runtime: container
+UpdatedAt: "2026-11-09T14:25:27.465863268Z"
+Version:
+  Index: 19

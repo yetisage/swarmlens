@@ -1,0 +1,35 @@
+Hostname:         vm
+ID:               okf0nzz6onffdvoim55yqcrhr
+Role:             manager
+Availability:     active
+Status:           ready
+Address:          127.0.0.1
+Manager:          leader at 127.0.0.1:2377
+Engine:           29.9.2
+Platform:         linux/x86_64
+Resources:        cpu 4.00, memory 15.7GiB
+Labels:           <none>
+Plugins:          Log: awslogs
+                  Log: fluentd
+                  Log: gcplogs
+                  Log: gelf
+                  Log: journald
+                  Log: json-file
+                  Log: local
+                  Log: splunk
+                  Log: syslog
+                  Network: bridge
+                  Network: host
+                  Network: ipvlan
+                  Network: macvlan
+                  Network: null
+                  Network: overlay
+                  Volume: local
+Created:          2026-11-09 14:25:25 UTC (34m ago)
+Updated:          2026-11-09 14:25:28 UTC (34m ago)
+Tasks:
+  shop_api.1                 running    34m
+  shop_api.2                 running    34m
+  shop_worker.1              running    34m
+  web.1                      running    34m
+  web.2                      running    34m

@@ -1,0 +1,45 @@
+{
+  "CreatedAt": "2026-11-09T14:25:28.959678435Z",
+  "DesiredState": "shutdown",
+  "ID": "cv6hnf2zobka9r9mhrds94c6b",
+  "Labels": {},
+  "NodeID": "okf0nzz6onffdvoim55yqcrhr",
+  "ServiceID": "jvwk522eh1e6p6znovhll08pg",
+  "Slot": 1,
+  "Spec": {
+    "ContainerSpec": {
+      "DNSConfig": {},
+      "Image": "no-such-registry.invalid/ghost:1",
+      "Init": false,
+      "Isolation": "default"
+    },
+    "ForceUpdate": 0,
+    "Placement": {},
+    "Resources": {
+      "Limits": {},
+      "Reservations": {}
+    },
+    "RestartPolicy": {
+      "Condition": "none",
+      "Delay": 5000000000,
+      "MaxAttempts": 0
+    }
+  },
+  "Status": {
+    "ContainerStatus": {
+      "ContainerID": "",
+      "ExitCode": 0,
+      "PID": 0
+    },
+    "Err": "Get \"https://no-such-registry.invalid/v2/\": Forbidden",
+    "Message": "preparing",
+    "PortStatus": {},
+    "State": "rejected",
+    "Timestamp": "2026-11-09T14:25:29.415308938Z"
+  },
+  "UpdatedAt": "2026-11-09T14:25:29.687733786Z",
+  "Version": {
+    "Index": 46
+  },
+  "Volumes": null
+}

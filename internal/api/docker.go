@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -132,7 +133,10 @@ func defaultEndpoint() endpoint {
 	return ep
 }
 
-// fromEnvTLS applies DOCKER_TLS_VERIFY / DOCKER_CERT_PATH.
+// fromEnvTLS applies DOCKER_TLS_VERIFY / DOCKER_CERT_PATH. The CA is always
+// used (and an unreadable one is an error, so verification is never quietly
+// dropped); the client certificate only if it is there, because a daemon
+// that does not ask for one is a normal setup.
 func (e *endpoint) fromEnvTLS() {
 	if os.Getenv("DOCKER_TLS_VERIFY") == "" {
 		return
@@ -141,9 +145,16 @@ func (e *endpoint) fromEnvTLS() {
 	if dir == "" {
 		dir = dockerConfigDir()
 	}
-	e.caFile = dir + "/ca.pem"
-	e.certFile = dir + "/cert.pem"
-	e.keyFile = dir + "/key.pem"
+	e.caFile = filepath.Join(dir, "ca.pem")
+	cert, key := filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
+	if fileExists(cert) && fileExists(key) {
+		e.certFile, e.keyFile = cert, key
+	}
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
 
 func newClient(ep endpoint) (*client.Client, error) {

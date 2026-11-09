@@ -80,11 +80,21 @@ func sortedPairs(m map[string]string) []string {
 	return out
 }
 
+// now and zone are what the reports measure and show time with. They are
+// variables so that tests can freeze them.
+var (
+	now  = time.Now
+	zone = time.Local
+)
+
+// since is how long ago t was, by the clock of the reports.
+func since(t time.Time) time.Duration { return now().Sub(t) }
+
 func stamp(t time.Time) string {
 	if t.IsZero() {
 		return ""
 	}
-	return fmt.Sprintf("%s (%s ago)", t.Local().Format("2006-01-02 15:04:05 MST"), HumanDuration(time.Since(t)))
+	return fmt.Sprintf("%s (%s ago)", t.In(zone).Format("2006-01-02 15:04:05 MST"), HumanDuration(since(t)))
 }
 
 func cores(nano int64) string { return fmt.Sprintf("%.2f", float64(nano)/1e9) }
@@ -290,7 +300,7 @@ func (a *API) describeService(ctx context.Context, id string) (string, error) {
 				d.line(fmt.Sprintf("  … %d more\n", len(tasks)-i))
 				break
 			}
-			line := fmt.Sprintf("%-22s %-10s %-14s %s", t.Name, t.State, t.Node, HumanDuration(time.Since(t.Updated)))
+			line := fmt.Sprintf("%-22s %-10s %-14s %s", t.Name, t.State, t.Node, HumanDuration(since(t.Updated)))
 			if t.Error != "" {
 				line += "  " + t.Error
 			}
@@ -352,7 +362,7 @@ func (a *API) describeTask(ctx context.Context, id string) (string, error) {
 	}
 	d.kv(0, "Image", row.Image)
 	d.kv(0, "Desired State", string(t.DesiredState))
-	d.kv(0, "State", fmt.Sprintf("%s (since %s ago)", t.Status.State, HumanDuration(time.Since(t.Status.Timestamp))))
+	d.kv(0, "State", fmt.Sprintf("%s (since %s ago)", t.Status.State, HumanDuration(since(t.Status.Timestamp))))
 	d.kv(0, "Message", t.Status.Message)
 	d.kv(0, "Error", t.Status.Err)
 	if cs := t.Status.ContainerStatus; cs != nil {
@@ -417,7 +427,7 @@ func (a *API) describeNode(ctx context.Context, id string) (string, error) {
 					d.line(fmt.Sprintf("  … %d more\n", len(running)-i))
 					break
 				}
-				d.line(fmt.Sprintf("  %-26s %-10s %s\n", t.Name, t.State, HumanDuration(time.Since(t.Updated))))
+				d.line(fmt.Sprintf("  %-26s %-10s %s\n", t.Name, t.State, HumanDuration(since(t.Updated))))
 			}
 		}
 	}

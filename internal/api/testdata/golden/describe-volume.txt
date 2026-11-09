@@ -1,0 +1,7 @@
+Name:             shop_data
+Stack:            shop
+Driver:           local
+Scope:            local
+Mountpoint:       /var/lib/docker/volumes/shop_data/_data
+Labels:           com.docker.stack.namespace=shop
+Created:          2026-11-09 14:25:28 UTC (34m ago)

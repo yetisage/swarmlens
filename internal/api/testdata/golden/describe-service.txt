@@ -1,0 +1,23 @@
+Name:             shop_api
+ID:               vkjc6op8n20dyl0dtuyxf85hd
+Stack:            shop
+Mode:             replicated
+Replicas:         2 running, 2 desired
+Image:            hello:1
+Ports:            *:8080->80/tcp
+Labels:           com.docker.stack.image=hello:1
+                  com.docker.stack.namespace=shop
+Created:          2026-11-09 14:25:27 UTC (34m ago)
+Updated:          2026-11-09 14:25:27 UTC (34m ago)
+Rollback:         not available
+Container:
+  Env:              ESC=pwn
+                    TOKEN=abc123
+  Labels:           com.docker.stack.namespace=shop
+  Secrets:          shop_dbpass -> /run/secrets/dbpass
+  Configs:          shop_appcfg -> appcfg
+Networks:         shop_back (aliases api)
+Endpoint Mode:    vip
+Tasks:
+  shop_api.2             running    vm             34m
+  shop_api.1             running    vm             34m

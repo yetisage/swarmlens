@@ -1,0 +1,61 @@
+{
+  "Attachable": false,
+  "ConfigFrom": {
+    "Network": ""
+  },
+  "ConfigOnly": false,
+  "Containers": {
+    "66863b4cdc01d6071ac84829bebba9fe82926ae12918ba1b50e329162d414ac2": {
+      "EndpointID": "ee27deda3ab01b0b206f69263db0d35b1e823d0273bfbc3b5d962c70b07c0eac",
+      "IPv4Address": "10.0.1.3/24",
+      "IPv6Address": "",
+      "MacAddress": "02:42:0a:00:01:03",
+      "Name": "shop_api.1.srmnarz81809ylrvax20qsegy"
+    },
+    "f5241955ce33245132eaaaf634f61448b59d06c77be54e58b26df7cfebfe7723": {
+      "EndpointID": "b246f8cb69c981e006ea69a903c787a6e0bc37b40044379fed349ffd84f76908",
+      "IPv4Address": "10.0.1.4/24",
+      "IPv6Address": "",
+      "MacAddress": "02:42:0a:00:01:04",
+      "Name": "shop_api.2.g3i01cu8gkw4mkhk3m0xhcapu"
+    },
+    "lb-shop_back": {
+      "EndpointID": "c783810354e9d3dae68eee8b691607d297a69135a436ee579b472bced9839488",
+      "IPv4Address": "10.0.1.5/24",
+      "IPv6Address": "",
+      "MacAddress": "02:42:0a:00:01:05",
+      "Name": "shop_back-endpoint"
+    }
+  },
+  "Created": "2026-11-09T14:25:27.627654192Z",
+  "Driver": "overlay",
+  "EnableIPv4": true,
+  "EnableIPv6": false,
+  "IPAM": {
+    "Config": [
+      {
+        "Gateway": "10.0.1.1",
+        "Subnet": "10.0.1.0/24"
+      }
+    ],
+    "Driver": "default",
+    "Options": null
+  },
+  "Id": "qdvzpywjn24d3kejbx821bzzp",
+  "Ingress": false,
+  "Internal": false,
+  "Labels": {
+    "com.docker.stack.namespace": "shop"
+  },
+  "Name": "shop_back",
+  "Options": {
+    "com.docker.network.driver.overlay.vxlanid_list": "4097"
+  },
+  "Peers": [
+    {
+      "IP": "127.0.0.1",
+      "Name": "3dd4607ffe35"
+    }
+  ],
+  "Scope": "swarm"
+}

@@ -1,0 +1,12 @@
+Name:             shop
+Orchestrator:     Swarm
+Services:         2 (0 degraded)
+Tasks:            3 running, 3 desired
+Networks:         2
+Volumes:          1
+Secrets:          1
+Configs:          1
+Created:          2026-11-09 14:25:27 UTC (34m ago)
+Services:
+  shop_api                           replicated   2/2  hello:1
+  shop_worker                        replicated   1/1  hello:1
