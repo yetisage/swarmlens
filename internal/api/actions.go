@@ -26,6 +26,9 @@ func (a *API) ScaleService(ctx context.Context, id string, replicas int) error {
 	if svc.Spec.Mode.Replicated == nil {
 		return fmt.Errorf("service %q is not replicated", svc.Spec.Name)
 	}
+	if err := keepsEverything(res.Raw, svc.Spec); err != nil {
+		return fmt.Errorf("service %q: %w", svc.Spec.Name, err)
+	}
 	if replicas < 0 {
 		replicas = 0
 	}
@@ -43,6 +46,9 @@ func (a *API) RestartService(ctx context.Context, id string) error {
 		return err
 	}
 	svc := res.Service
+	if err := keepsEverything(res.Raw, svc.Spec); err != nil {
+		return fmt.Errorf("service %q: %w", svc.Spec.Name, err)
+	}
 	svc.Spec.TaskTemplate.ForceUpdate++
 	_, err = a.cli.ServiceUpdate(ctx, svc.ID, client.ServiceUpdateOptions{Version: svc.Version, Spec: svc.Spec})
 	return err
