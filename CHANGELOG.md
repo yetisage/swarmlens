@@ -27,6 +27,9 @@ Everything since v0.6.0. Several changes are breaking; they are marked.
 - **`--readonly` also takes away the shell** into a task's container, which
   changes whatever it is used for, and the backend itself refuses every change
   (`api.ReadOnly`), however it is asked for.
+- **Docker Engine 20.10 or newer is required** (API 1.41). An older daemon is
+  refused with a message that says so. It does not report how many tasks of a
+  service are running, so the services view would have read "0 running".
 
 ### Fixed
 
@@ -77,6 +80,9 @@ Everything since v0.6.0. Several changes are breaking; they are marked.
 
 ### Added
 
+- Scale and restart check that the update they send keeps everything the engine
+  said about the service, and refuse, naming the field, when it would not,
+  instead of taking a field away that the client's types do not know.
 - `--smoke-image` chooses the image of the `--smoke-mutate` service.
 - Releases: tagging `vX.Y.Z` builds archives for Linux, macOS, Windows and
   FreeBSD (amd64, arm64, armv7, 386) with checksums, a build attestation and the
@@ -84,7 +90,8 @@ Everything since v0.6.0. Several changes are breaking; they are marked.
 - CI: static checks (gofmt, tidy, vet, golangci-lint), the suite with the race
   detector and in random order, the suite on 32-bit and macOS, cross-builds for
   nine platforms, and a job that runs the code against a real swarm. A weekly
-  `govulncheck`. Dependabot for modules and actions.
+  `govulncheck`. Dependabot for modules and actions; the Docker client and its
+  API types are updated together and apart from the rest.
 - `SECURITY.md`, `CONTRIBUTING.md`, a Makefile that mirrors CI (`make ci`).
 
 ### Changed
@@ -99,14 +106,14 @@ Everything since v0.6.0. Several changes are breaking; they are marked.
   responses recorded from a Docker 29.9.2 swarm.
 - golangci-lint is clean; dead code is gone.
 - `golang.org/x/crypto` is no longer a dependency.
-
-### Not done, on purpose
-
-- Moving from `github.com/docker/docker` (v28.5.2, the last release on that
-  path) to `github.com/moby/moby/client`: it is still v0.x, its API is a
-  different shape from top to bottom (63 call sites, 31 methods) and moving
-  between its minor versions may break, while the current client works with
-  Docker 29 through API negotiation. See CONTRIBUTING.md for when to revisit.
+- **The Docker client is `github.com/moby/moby/client`** (v0.6.2, with the API
+  types of `github.com/moby/moby/api`), the maintained successor of
+  `github.com/docker/docker`, whose module path stopped at v28.5.2 and which the
+  vulnerability database lists daemon advisories against, with no fix possible
+  there. Nine other modules are gone with it. What swarmlens shows is unchanged,
+  checked byte for byte against a real Docker 29.9.2 swarm, except that it now
+  asks Docker 29 for API 1.56 instead of 1.51: the YAML of a network shows the
+  engine's `Status`, the number of addresses in use in each subnet.
 
 ## [0.6.0]
 

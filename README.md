@@ -87,6 +87,11 @@ make build            # or: go build -o swarmlens .
 | `--smoke`, `--smoke-mutate` | self-test against the daemon (`--smoke-mutate` creates, scales and removes a throwaway service, `--smoke-image` says which image) |
 | `--debug-events` | stream the raw event feed |
 
+**Docker versions.** swarmlens needs a daemon of **Docker Engine 20.10 or newer**
+(API 1.41 and up) and asks it for the newest API version both sides speak, up to
+1.56. An older daemon is refused with a message that says so, because the engine
+only reports how many tasks of a service are running from 1.41 on.
+
 **Connection.** swarmlens resolves the daemon like the docker CLI does:
 `--context`, then `DOCKER_HOST`, then `DOCKER_CONTEXT`, then the current
 context of `~/.docker/config.json`, then the local socket. `tcp://`, `unix://`,
@@ -303,8 +308,10 @@ go test ./internal/api -run Recorded -update           # refresh the describe/YA
   event (`create`, `start`).
 - Volumes are per node: the volumes view lists those of the node you are
   connected to.
-- The client negotiates the API version down to what both sides speak (1.51 with
-  Docker 29), so objects are read and written as that version knows them.
+- The client negotiates the API version down to what both sides speak (1.56 with
+  Docker 29.9), so objects are read and written as that version knows them. The
+  YAML of a network shows its `Status` (how many addresses of each subnet are in
+  use) from API 1.52 on.
 - Bubble Tea v1 asks the terminal for its background colour at start-up; a
   terminal that never answers delays the first frame.
 

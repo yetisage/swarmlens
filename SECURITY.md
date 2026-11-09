@@ -55,6 +55,6 @@ mark them `dangerous: true`.
 ## Known limits
 
 - `ssh://` needs the OpenSSH client; there is no built-in one.
-- The Docker client library is `github.com/docker/docker` v28.5.2, the last
-  release on that path. It talks to newer daemons through API version
-  negotiation. See CONTRIBUTING.md.
+- The Docker client library, `github.com/moby/moby/client`, is still v0.x: it is
+  updated through Dependabot and only when the tests, the real-swarm job
+  included, pass. See CONTRIBUTING.md.

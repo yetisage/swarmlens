@@ -68,17 +68,33 @@ goreleaser release --snapshot --clean --skip=publish
 
 ## Decisions worth knowing
 
-**The Docker client is `github.com/docker/docker` v28.5.2.** That is the last
-release on that path; the maintained client is `github.com/moby/moby/client`.
-It was not adopted because it is still v0.x (eight releases in a short time, so
-minor versions can break), its API has a different shape from top to bottom
-(every call takes an options struct and returns a result struct; 63 call sites
-across 31 methods here), and the current client works with Docker 29 through API
-version negotiation, which the recorded fixtures and the real-swarm CI job
-exercise. Revisit it when `moby/moby/client` reaches v1.0, when the old module
-needs a security fix, or when a Docker API change cannot be handled by
-negotiation. The tests are written against the HTTP API, not the client, so
-they will tell you if the move changes behaviour.
+**The Docker client is `github.com/moby/moby/client`**, with the API types of
+`github.com/moby/moby/api`. It replaced `github.com/docker/docker`, whose module
+path ends at v28.5.2: the vulnerability database lists Moby daemon advisories
+against that path, for the whole module and with no fixed version ever, so every
+scan of swarmlens failed on bugs of a daemon that it does not contain. The new
+client is still v0.x, so its minor releases may break its API. What contains
+that:
+
+- Only `internal/api` imports it; the UI sees `api.Backend`.
+- The tests are written against the HTTP API, not the client: recorded responses
+  of a real Docker 29.9.2 swarm (API 1.56), golden reports, TLS and ssh against
+  fakes, and the real-swarm CI job. They tell you if an update changes behaviour.
+- Scale and restart rebuild the update from the client's types, which would
+  drop a field the types do not have. `keepsEverything` refuses to send such an
+  update, and `TestRecordedServicesSurviveTheirTypes` fails an update of the
+  client whose types no longer cover what the engine sends.
+- The oldest daemon is pinned in `minAPIVersion`: API 1.41, Docker Engine 20.10,
+  because the engine reports how many tasks of a service run from there on (the
+  client itself goes down to 1.40). `TestTheMinimumDaemonIsWhatTheDocsPromise`
+  fails when an update raises the client's own floor above it.
+- Dependabot updates `github.com/moby/moby/*` together, apart from the other
+  modules.
+
+To update it by hand: `go get github.com/moby/moby/client@vX
+github.com/moby/moby/api@vY`, `go mod tidy`, `make ci` and, with a daemon at
+hand, `make live`. When a newer API adds something swarmlens shows, record the
+fixtures again (the README in `internal/api/testdata/docker-29.9.2`).
 
 **`ssh://` goes through the system `ssh`.** A built-in client has to reimplement
 host key verification, `~/.ssh/config`, agents, hardware keys and passphrases,
