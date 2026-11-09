@@ -1,0 +1,32 @@
+name: Vulnerabilities
+
+# A scan finds things that were disclosed after the code was written, so it
+# also runs on a schedule and not only when the dependencies change. It is a
+# workflow of its own so that a new advisory does not turn an unrelated
+# pull request red.
+on:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [go.mod, go.sum]
+  pull_request:
+    paths: [go.mod, go.sum, .github/workflows/vulncheck.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # the newest Go, so that what is reported is in the dependencies and not
+      # in a standard library that has been fixed since
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+          check-latest: true
+      - run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...

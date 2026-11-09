@@ -5,18 +5,26 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  static:
+    name: static checks
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
 
-      - name: Check formatting
+      - name: gofmt
         run: |
           unformatted=$(gofmt -l main.go internal)
           if [ -n "$unformatted" ]; then
@@ -25,11 +33,130 @@ jobs:
             exit 1
           fi
 
-      - name: Vet
-        run: go vet ./...
+      - name: go.mod and go.sum are tidy
+        run: go mod tidy -diff
 
-      - name: Test
-        run: go test ./... -count=1 -race
+      - run: go vet ./...
 
-      - name: Build
-        run: go build -ldflags "-s -w -X main.version=${{ github.sha }}" -o swarmlens .
+      # The linter is built here, with the Go version go.mod asks for: a
+      # prebuilt golangci-lint compiled with an older Go refuses to analyse
+      # the module ("the Go language version used to build golangci-lint is
+      # lower than the targeted Go version"). The linter version is pinned;
+      # Dependabot does not see it, so bump it by hand now and then.
+      - name: golangci-lint
+        run: |
+          GOTOOLCHAIN="go$(go list -m -f '{{.GoVersion}}')" \
+            go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.15.0 run ./...
+
+  test:
+    name: test (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    # macOS has not run this suite yet: it reports, but does not block, until
+    # it has been green for a while. Then drop the flag.
+    continue-on-error: ${{ matrix.experimental }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, experimental: false }
+          - { os: macos-latest, experimental: true }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test ./... -race -shuffle=on -count=1 -coverprofile=cover.out
+      - name: coverage
+        run: go tool cover -func=cover.out | tail -n 1
+
+  # int is 32 bits wide here: this is the job that finds the bugs that only
+  # exist on linux/arm and 386 (the log view once crashed on them). The race
+  # detector does not exist on 386, so there is no -race.
+  test-32bit:
+    name: test (linux/386)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go test ./... -count=1
+        env:
+          GOARCH: "386"
+          CGO_ENABLED: "0"
+
+  cross-build:
+    name: build (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - linux/amd64
+          - linux/arm64
+          - linux/arm
+          - linux/386
+          - darwin/amd64
+          - darwin/arm64
+          - windows/amd64
+          - windows/arm64
+          - freebsd/amd64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: go build and go vet (tests included)
+        run: |
+          target='${{ matrix.target }}'
+          export GOOS="${target%/*}" GOARCH="${target#*/}" CGO_ENABLED=0
+          go build -o /dev/null .
+          go vet ./...
+
+  # The suite runs against fakes and recorded responses; this job runs the
+  # same code against a real daemon, which is what keeps the Docker API
+  # assumptions honest.
+  integration:
+    name: real swarm
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: a single-node swarm, and a tiny image that needs no registry
+        run: |
+          docker version
+          docker swarm init --advertise-addr 127.0.0.1 --listen-addr 127.0.0.1:2377
+          dir=$(mktemp -d)
+          printf 'package main\nimport ("fmt";"os";"time")\nfunc main(){for i:=0;;i++{fmt.Println("\\x1b[32mINFO\\x1b[0m tick",i);if i%%3==0{fmt.Fprintln(os.Stderr,"\\x1b[31mERROR\\x1b[0m odd tick",i)};time.Sleep(time.Second)}}\n' > "$dir/main.go"
+          printf 'module hello\ngo 1.22\n' > "$dir/go.mod"
+          (cd "$dir" && CGO_ENABLED=0 go build -o hello . && tar -cf hello.tar hello)
+          docker import "$dir/hello.tar" hello:1 --change 'CMD ["/hello"]'
+          docker service create --name web --replicas 2 --label owner=ci --detach hello:1
+          docker volume create --label com.docker.stack.namespace=ci ci_data
+          # give the tasks a moment to start
+          for i in $(seq 1 30); do
+            [ "$(docker service ls --filter name=web --format '{{.Replicas}}')" = "2/2" ] && break
+            sleep 1
+          done
+          docker service ls
+
+      - name: read-only API tests against the daemon
+        run: go test ./internal/api -run 'TestLive$' -count=1 -v
+        env:
+          SWARMLENS_LIVE: "1"
+
+      - name: smoke test, including create, scale, restart and remove
+        run: |
+          go build -o swarmlens .
+          ./swarmlens --smoke --smoke-mutate --smoke-image hello:1
