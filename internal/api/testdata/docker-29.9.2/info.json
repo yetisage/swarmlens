@@ -1,0 +1,18 @@
+{
+  "Name": "vm",
+  "ServerVersion": "29.9.2",
+  "Swarm": {
+    "Cluster": {
+      "ID": "yv844iqwwxm709dbqrnt2qdq0",
+      "Spec": {
+        "Name": "default"
+      }
+    },
+    "ControlAvailable": true,
+    "LocalNodeState": "active",
+    "Managers": 1,
+    "NodeAddr": "127.0.0.1",
+    "NodeID": "qs531opjwnjwvvp41wysh44rv",
+    "Nodes": 1
+  }
+}

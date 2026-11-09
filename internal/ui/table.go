@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"fmt"
@@ -13,7 +14,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/api"
 )
 
 type sortKind uint8
@@ -66,7 +67,7 @@ type loadQuery struct {
 	scope     string // active stack ("" = all)
 	serviceID string // drill-down: tasks of a service
 	nodeID    string // drill-down: tasks on a node
-	events    []api.Event
+	events    []seenEvent
 	now       time.Time // the clock ages are measured against
 }
 
@@ -571,21 +572,16 @@ func (v *tableView) pickCol(delta int) {
 	v.selCol = cols[pos]
 }
 
-// save writes the visible table to a CSV file, like k9s' ctrl-s.
+// save writes the visible table to a CSV file, like k9s' ctrl-s. The file is
+// private to the user: what a cluster looks like is nobody else's business.
 func (v *tableView) save() {
-	dir := stateDir("screen-dumps", sanitize(v.a.be.ContextName()))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		v.a.flash(flashErr, err.Error())
-		return
-	}
-	path := filepath.Join(dir, fmt.Sprintf("%s-%d.csv", v.res.key, time.Now().Unix()))
-	f, err := os.Create(path)
+	dir, err := stateDir("screen-dumps", sanitize(v.a.be.ContextName()))
 	if err != nil {
 		v.a.flash(flashErr, err.Error())
 		return
 	}
-	defer f.Close()
-	w := csv.NewWriter(f)
+	var buf bytes.Buffer
+	w := csv.NewWriter(&buf)
 	cols := v.visibleCols()
 	head := make([]string, len(cols))
 	for i, c := range cols {
@@ -604,21 +600,40 @@ func (v *tableView) save() {
 		v.a.flash(flashErr, err.Error())
 		return
 	}
+	path := filepath.Join(dir, fmt.Sprintf("%s-%d.csv", v.res.key, time.Now().Unix()))
+	if err := os.WriteFile(path, buf.Bytes(), 0o600); err != nil {
+		v.a.flash(flashErr, err.Error())
+		return
+	}
 	v.a.flash(flashInfo, "File saved to "+path)
 }
 
-func sanitize(s string) string {
-	return regexp.MustCompile(`[^A-Za-z0-9._-]+`).ReplaceAllString(s, "_")
-}
+// unsafeName matches what is not fit for a file name.
+var unsafeName = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 
-// stateDir is where swarmlens keeps dumps: $XDG_STATE_HOME/swarmlens/….
-func stateDir(parts ...string) string {
+func sanitize(s string) string { return unsafeName.ReplaceAllString(s, "_") }
+
+// stateDir is where swarmlens keeps what it writes: $XDG_STATE_HOME/swarmlens/…
+// It is created for the user alone (and made so if an older version left it
+// wider): logs and tables describe a cluster and often hold secrets.
+func stateDir(parts ...string) (string, error) {
 	base := os.Getenv("XDG_STATE_HOME")
 	if base == "" {
-		home, _ := os.UserHomeDir()
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("cannot tell where to save: %w", err)
+		}
 		base = filepath.Join(home, ".local", "state")
 	}
-	return filepath.Join(append([]string{base, "swarmlens"}, parts...)...)
+	root := filepath.Join(base, "swarmlens")
+	dir := filepath.Join(append([]string{root}, parts...)...)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(root, 0o700); err != nil {
+		return "", err
+	}
+	return dir, nil
 }
 
 // ---- drawing ----

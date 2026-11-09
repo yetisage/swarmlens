@@ -1,0 +1,10 @@
+Name:             shop_appcfg
+ID:               ulca27up73bcm61rte609itl4
+Stack:            shop
+Labels:           com.docker.stack.namespace=shop
+Created:          2026-11-09 16:11:40 UTC (18m ago)
+Updated:          2026-11-09 16:11:40 UTC (18m ago)
+Size:             10B
+Used By:          shop_api
+Data:
+  key=value

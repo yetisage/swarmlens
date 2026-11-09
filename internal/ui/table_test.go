@@ -3,10 +3,11 @@ package ui
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
-	"swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/api"
 )
 
 func svcRow(id, name, stack string, running, desired int, age string) *row {
@@ -303,4 +304,62 @@ func TestSaveWritesCSV(t *testing.T) {
 		t.Errorf("csv must hold exactly the filtered rows:\n%s", text)
 	}
 	mustContain(t, a.screenText(), "File saved to")
+}
+
+// What a cluster looks like, and what its logs say, is nobody else's
+// business: dumps are written for the user alone, and a directory an older
+// version left wider is tightened.
+func TestSavedDumpsArePrivate(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("no unix permissions")
+	}
+	state := t.TempDir()
+	t.Setenv("XDG_STATE_HOME", state)
+	root := filepath.Join(state, "swarmlens")
+	if err := os.MkdirAll(root, 0o755); err != nil { // as an older version left it
+		t.Fatal(err)
+	}
+
+	a := newTestApp(t, 140, 38)
+	a.press("ctrl+s")
+	a.command("svc /shop_web")
+	a.press("l")
+	a.press("ctrl+s")
+
+	var files []string
+	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		info, err := d.Info()
+		if err != nil {
+			return err
+		}
+		switch {
+		case d.IsDir() && info.Mode().Perm()&0o077 != 0:
+			t.Errorf("directory %s is %v: others can enter it", path, info.Mode().Perm())
+		case !d.IsDir():
+			files = append(files, path)
+			if info.Mode().Perm()&0o077 != 0 {
+				t.Errorf("file %s is %v: others can read it", path, info.Mode().Perm())
+			}
+		}
+		return nil
+	})
+	if len(files) != 2 {
+		t.Errorf("want a table dump and a log dump, found %v", files)
+	}
+}
+
+func TestSaveSaysWhyItCannotSave(t *testing.T) {
+	blocker := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(blocker, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_STATE_HOME", blocker) // a file where a directory is needed
+	a := newTestApp(t, 140, 38)
+	a.press("ctrl+s")
+	if got := a.flashMsg; got.level != flashErr || got.text == "" {
+		t.Errorf("flash = %+v, want an error", got)
+	}
 }

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -135,5 +136,95 @@ func TestDirPrecedence(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/xdg")
 	if Dir() != "/xdg/swarmlens" {
 		t.Errorf("Dir() = %q", Dir())
+	}
+}
+
+// A key that means nothing must be an error that says where and what: a
+// mistyped readOnly leaving the session read-write, without a word, is the
+// kind of failure a config file must not have.
+func TestUnknownKeysAreErrorsThatSayWhereAndWhat(t *testing.T) {
+	for name, c := range map[string]struct {
+		file, content string
+		want          []string
+	}{
+		"wrong case": {"config.yaml", "swarmlens:\n  readonly: true\n",
+			[]string{"config.yaml", `line 2: unknown key "readonly"`, `did you mean "readOnly"?`}},
+		"a k9s config": {"config.yaml", "k9s:\n  refreshRate: 2\n",
+			[]string{`line 1: unknown key "k9s"`}},
+		"a plugin flag typo": {"plugins.yaml", "plugins:\n  x:\n    shortCut: a\n    command: ls\n    dangrous: true\n",
+			[]string{`did you mean "dangerous"?`}},
+		"nested": {"config.yaml", "swarmlens:\n  ui:\n    headles: true\n    logoless: true\n",
+			[]string{`line 3: unknown key "headles"`, `did you mean "headless"?`}},
+		"two at once": {"config.yaml", "swarmlens:\n  readonly: true\n  refreshrate: 3\n",
+			[]string{`unknown key "readonly"`, `unknown key "refreshrate"`, `did you mean "refreshRate"?`}},
+		"aliases": {"aliases.yaml", "alias:\n  dp: services\n",
+			[]string{"aliases.yaml", `unknown key "alias"`, `did you mean "aliases"?`}},
+		"a plugin flag": {"plugins.yaml", "plugins:\n  x:\n    shortCut: a\n    command: ls\n    dangrous: true\n",
+			[]string{"plugins.yaml", `line 5: unknown key "dangrous"`}},
+		"a plugin key": {"plugins.yaml", "plugins:\n  x:\n    shortcut: a\n    command: ls\n",
+			[]string{`unknown key "shortcut"`, `did you mean "shortCut"?`}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			write(t, dir, c.file, c.content)
+			_, err := Load(dir)
+			if err == nil {
+				t.Fatal("want an error")
+			}
+			for _, want := range c.want {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("%q is missing from %q", want, err)
+				}
+			}
+			if strings.Contains(err.Error(), "struct {") || strings.Contains(err.Error(), "rawConfig") {
+				t.Errorf("the message leaks Go types: %q", err)
+			}
+		})
+	}
+}
+
+// Empty files, comment-only files and k9s' own plugin fields are fine.
+func TestFilesThatAreEmptyOrFromK9sStillLoad(t *testing.T) {
+	dir := t.TempDir()
+	write(t, dir, "config.yaml", "")
+	write(t, dir, "aliases.yaml", "# nothing yet\n")
+	write(t, dir, "plugins.yaml", `
+plugins:
+  stern:
+    shortCut: Shift-S
+    description: Logs
+    scopes: [services]
+    command: stern
+    args: ["$NAME"]
+    # k9s fields without a meaning here: accepted and ignored
+    override: true
+    overwriteOutput: true
+    pipes: [a, b]
+`)
+	c, err := Load(dir)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if len(c.Plugins) != 1 || c.Plugins[0].Name != "stern" || c.RefreshRate != 2 {
+		t.Errorf("config = %+v", c)
+	}
+}
+
+func TestClosestKnownKey(t *testing.T) {
+	known := map[string]string{}
+	collectKeys(reflect.TypeOf(&rawConfig{}), known)
+	for in, want := range map[string]string{
+		"readonly": "readOnly", "READONLY": "readOnly", "refreshrate": "refreshRate", "headles": "headless",
+		"textwrap": "textWrap", "sinceSecond": "sinceSeconds", "tial": "tail",
+	} {
+		if got, ok := closest(in, known); !ok || got != want {
+			t.Errorf("closest(%q) = %q, %v; want %q", in, got, ok, want)
+		}
+	}
+	// nothing is near these: no suggestion beats a wrong one
+	for _, in := range []string{"k9s", "colour", "x", "completelydifferent"} {
+		if got, ok := closest(in, known); ok {
+			t.Errorf("closest(%q) = %q, want no suggestion", in, got)
+		}
 	}
 }

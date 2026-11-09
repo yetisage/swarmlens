@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"swarmlens/internal/config"
+	"github.com/yetisage/swarmlens/internal/config"
 )
 
 // pluginActions are the user's plugins that apply to a table, in k9s'
@@ -59,19 +59,56 @@ func (a *app) pluginVars(v *tableView, r *row) map[string]string {
 	return vars
 }
 
-// expand replaces $VAR and ${VAR}, longest names first so $COL-NAME is not
-// mistaken for $COL.
+// expand replaces $VAR and ${VAR} in one pass: a value that itself contains
+// "$NAME" is inserted as it is, not expanded again. The longest name wins, so
+// $COL-NAME is not read as $COL followed by "-NAME". Unknown variables are
+// left alone.
 func expand(s string, vars map[string]string) string {
-	keys := make([]string, 0, len(vars))
+	names := make([]string, 0, len(vars))
 	for k := range vars {
-		keys = append(keys, k)
+		names = append(names, k)
 	}
-	sort.Slice(keys, func(i, j int) bool { return len(keys[i]) > len(keys[j]) })
-	for _, k := range keys {
-		s = strings.ReplaceAll(s, "${"+k+"}", vars[k])
-		s = strings.ReplaceAll(s, "$"+k, vars[k])
+	sort.Slice(names, func(i, j int) bool {
+		if len(names[i]) != len(names[j]) {
+			return len(names[i]) > len(names[j])
+		}
+		return names[i] < names[j]
+	})
+
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		if s[i] != '$' {
+			b.WriteByte(s[i])
+			i++
+			continue
+		}
+		rest := s[i+1:]
+		if strings.HasPrefix(rest, "{") {
+			if end := strings.IndexByte(rest, '}'); end > 0 {
+				if v, ok := vars[rest[1:end]]; ok {
+					b.WriteString(v)
+					i += end + 2
+					continue
+				}
+			}
+		} else {
+			matched := false
+			for _, k := range names {
+				if strings.HasPrefix(rest, k) {
+					b.WriteString(vars[k])
+					i += 1 + len(k)
+					matched = true
+					break
+				}
+			}
+			if matched {
+				continue
+			}
+		}
+		b.WriteByte('$')
+		i++
 	}
-	return s
+	return b.String()
 }
 
 func (a *app) runPlugin(p config.Plugin, v *tableView) tea.Cmd {

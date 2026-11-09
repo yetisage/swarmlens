@@ -1,0 +1,20 @@
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      # The Docker client is v0.x, so its minor releases may break the API: it
+      # is updated on its own, together with the API types it needs, and CI (the
+      # real-swarm job included) says whether the update is safe.
+      moby:
+        patterns: ["github.com/moby/moby/*"]
+        update-types: [major, minor, patch]
+      go-modules:
+        exclude-patterns: ["github.com/moby/moby/*"]
+        update-types: [minor, patch]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

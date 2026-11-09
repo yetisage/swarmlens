@@ -9,11 +9,15 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
+	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -116,11 +120,19 @@ type rawPlugins struct {
 		Background  bool     `yaml:"background"`
 		Confirm     bool     `yaml:"confirm"`
 		Dangerous   bool     `yaml:"dangerous"`
+
+		// What k9s knows and has no meaning here: accepted, so that a k9s
+		// plugins file loads, and ignored.
+		Override        any `yaml:"override"`
+		Pipes           any `yaml:"pipes"`
+		OverwriteOutput any `yaml:"overwriteOutput"`
 	} `yaml:"plugins"`
 }
 
 // Load reads the configuration directory. Missing files are not an error;
-// unreadable or malformed ones are, and name the file.
+// unreadable or malformed ones are, and name the file. So are keys that
+// mean nothing: a typo in a setting such as readOnly must not leave the
+// setting off without a word.
 func Load(dir string) (*Config, error) {
 	c := Defaults()
 	if dir == "" {
@@ -184,7 +196,8 @@ func Load(dir string) (*Config, error) {
 	return c, nil
 }
 
-// readYAML decodes a file into out. A missing file leaves out untouched.
+// readYAML decodes a file into out, refusing keys out does not have. A missing
+// or empty file leaves out untouched.
 func readYAML(path string, out any) error {
 	raw, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
@@ -193,10 +206,103 @@ func readYAML(path string, out any) error {
 	if err != nil {
 		return err
 	}
-	if err := yaml.Unmarshal(raw, out); err != nil {
-		return fmt.Errorf("%s: %w", path, err)
+	dec := yaml.NewDecoder(bytes.NewReader(raw))
+	dec.KnownFields(true)
+	if err := dec.Decode(out); err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("%s: %w", path, friendly(err, reflect.TypeOf(out)))
 	}
 	return nil
+}
+
+var unknownField = regexp.MustCompile(`^(line \d+): field (\S+) not found in type .*$`)
+
+// friendly rewrites the decoder's complaints about unknown keys, which name a
+// Go type, into what the person who wrote the file needs: where, which key,
+// and the key that exists and is nearly the same, if there is one.
+func friendly(err error, target reflect.Type) error {
+	var te *yaml.TypeError
+	if !errors.As(err, &te) {
+		return err
+	}
+	known := map[string]string{} // lower case -> as written
+	collectKeys(target, known)
+	msgs := make([]string, 0, len(te.Errors))
+	for _, e := range te.Errors {
+		m := unknownField.FindStringSubmatch(e)
+		if m == nil {
+			msgs = append(msgs, e)
+			continue
+		}
+		msg := fmt.Sprintf("%s: unknown key %q", m[1], m[2])
+		if want, ok := closest(m[2], known); ok {
+			msg += fmt.Sprintf(" (did you mean %q?)", want)
+		}
+		msgs = append(msgs, msg)
+	}
+	return errors.New(strings.Join(msgs, "; "))
+}
+
+// closest finds the known key a misspelt one most likely meant: the same
+// letters in another case, or a couple of edits away (a short key gets one).
+func closest(key string, known map[string]string) (string, bool) {
+	lower := strings.ToLower(key)
+	limit := 2
+	if len(key) <= 4 {
+		limit = 1
+	}
+	best, bestDist := "", limit+1
+	for k, written := range known {
+		d := editDistance(lower, k)
+		if d < bestDist || (d == bestDist && written < best) {
+			best, bestDist = written, d
+		}
+	}
+	return best, bestDist <= limit
+}
+
+// editDistance is the number of insertions, deletions, substitutions and
+// swaps of two neighbouring letters (the commonest typo) between two strings.
+func editDistance(a, b string) int {
+	prev2 := make([]int, len(b)+1)
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+			if i > 1 && j > 1 && a[i-1] == b[j-2] && a[i-2] == b[j-1] {
+				cur[j] = min(cur[j], prev2[j-2]+1)
+			}
+		}
+		prev2, prev = prev, cur
+	}
+	return prev[len(b)]
+}
+
+// collectKeys gathers every key a type reads, nested ones included.
+func collectKeys(t reflect.Type, into map[string]string) {
+	for t.Kind() == reflect.Pointer || t.Kind() == reflect.Slice || t.Kind() == reflect.Map {
+		t = t.Elem()
+	}
+	if t.Kind() != reflect.Struct {
+		return
+	}
+	for i := 0; i < t.NumField(); i++ {
+		f := t.Field(i)
+		name := strings.Split(f.Tag.Get("yaml"), ",")[0]
+		if name == "" || name == "-" {
+			continue
+		}
+		into[strings.ToLower(name)] = name
+		collectKeys(f.Type, into)
+	}
 }
 
 // ParseShortcut turns a k9s style shortcut ("Shift-L", "Ctrl-X", "Alt-a",

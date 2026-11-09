@@ -1,0 +1,11 @@
+{
+  "CreatedAt": "2026-11-09T16:11:42Z",
+  "Driver": "local",
+  "Labels": {
+    "com.docker.stack.namespace": "shop"
+  },
+  "Mountpoint": "/var/lib/docker/volumes/shop_data/_data",
+  "Name": "shop_data",
+  "Options": null,
+  "Scope": "local"
+}

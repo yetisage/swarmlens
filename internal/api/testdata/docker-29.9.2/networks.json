@@ -1,0 +1,174 @@
+[
+  {
+    "Attachable": false,
+    "ConfigFrom": {
+      "Network": ""
+    },
+    "ConfigOnly": false,
+    "Created": "2026-11-09T16:11:40.174782374Z",
+    "Driver": "overlay",
+    "EnableIPv4": true,
+    "EnableIPv6": false,
+    "IPAM": {
+      "Config": [
+        {
+          "Gateway": "10.0.2.1",
+          "Subnet": "10.0.2.0/24"
+        }
+      ],
+      "Driver": "default",
+      "Options": null
+    },
+    "Id": "nay8fitdso9ruzyspfi2t4c5a",
+    "Ingress": false,
+    "Internal": false,
+    "Labels": {
+      "com.docker.stack.namespace": "shop"
+    },
+    "Name": "shop_back",
+    "Options": {
+      "com.docker.network.driver.overlay.vxlanid_list": "4098"
+    },
+    "Scope": "swarm"
+  },
+  {
+    "Attachable": false,
+    "ConfigFrom": {
+      "Network": ""
+    },
+    "ConfigOnly": false,
+    "Created": "2026-11-09T16:11:39.522042585Z",
+    "Driver": "overlay",
+    "EnableIPv4": true,
+    "EnableIPv6": false,
+    "IPAM": {
+      "Config": [
+        {
+          "Gateway": "10.0.0.1",
+          "Subnet": "10.0.0.0/24"
+        }
+      ],
+      "Driver": "default",
+      "Options": null
+    },
+    "Id": "p46tweo17453z762gy8tqfm7r",
+    "Ingress": true,
+    "Internal": false,
+    "Labels": null,
+    "Name": "ingress",
+    "Options": {
+      "com.docker.network.driver.overlay.vxlanid_list": "4096"
+    },
+    "Scope": "swarm"
+  },
+  {
+    "Attachable": false,
+    "ConfigFrom": {
+      "Network": ""
+    },
+    "ConfigOnly": false,
+    "Created": "2026-11-09T16:11:40.173063648Z",
+    "Driver": "overlay",
+    "EnableIPv4": true,
+    "EnableIPv6": false,
+    "IPAM": {
+      "Config": [
+        {
+          "Gateway": "10.0.1.1",
+          "Subnet": "10.0.1.0/24"
+        }
+      ],
+      "Driver": "default",
+      "Options": null
+    },
+    "Id": "pnha75i1rb2yy454ew8q70ulx",
+    "Ingress": false,
+    "Internal": false,
+    "Labels": {
+      "com.docker.stack.namespace": "shop"
+    },
+    "Name": "shop_default",
+    "Options": {
+      "com.docker.network.driver.overlay.vxlanid_list": "4097"
+    },
+    "Scope": "swarm"
+  },
+  {
+    "Attachable": false,
+    "ConfigFrom": {
+      "Network": ""
+    },
+    "ConfigOnly": false,
+    "Created": "2026-11-09T14:25:26.537154645Z",
+    "Driver": "bridge",
+    "EnableIPv4": true,
+    "EnableIPv6": false,
+    "IPAM": {
+      "Config": [
+        {
+          "Gateway": "172.17.0.1",
+          "Subnet": "172.17.0.0/16"
+        }
+      ],
+      "Driver": "default",
+      "Options": null
+    },
+    "Id": "71e856a191f867ec819d3ce3516d942835b42e256ff38f92244362f85beedb51",
+    "Ingress": false,
+    "Internal": false,
+    "Labels": {},
+    "Name": "docker_gwbridge",
+    "Options": {
+      "com.docker.network.bridge.enable_icc": "false",
+      "com.docker.network.bridge.enable_ip_masquerade": "true",
+      "com.docker.network.bridge.name": "docker_gwbridge"
+    },
+    "Scope": "local"
+  },
+  {
+    "Attachable": false,
+    "ConfigFrom": {
+      "Network": ""
+    },
+    "ConfigOnly": false,
+    "Created": "2026-11-09T14:25:24.737482032Z",
+    "Driver": "null",
+    "EnableIPv4": true,
+    "EnableIPv6": false,
+    "IPAM": {
+      "Config": null,
+      "Driver": "default",
+      "Options": null
+    },
+    "Id": "ac4e6c93c3cb8f82ca5a49ef101e6cb6a8bf6693d55bfbe1715c09120e41abde",
+    "Ingress": false,
+    "Internal": false,
+    "Labels": {},
+    "Name": "none",
+    "Options": {},
+    "Scope": "local"
+  },
+  {
+    "Attachable": false,
+    "ConfigFrom": {
+      "Network": ""
+    },
+    "ConfigOnly": false,
+    "Created": "2026-11-09T14:25:24.738290676Z",
+    "Driver": "host",
+    "EnableIPv4": true,
+    "EnableIPv6": false,
+    "IPAM": {
+      "Config": null,
+      "Driver": "default",
+      "Options": null
+    },
+    "Id": "3e3fef6f3a982c1193d31c9618277e1817c5ae78a142fdaaed3a39ba2a2f166e",
+    "Ingress": false,
+    "Internal": false,
+    "Labels": {},
+    "Name": "host",
+    "Options": {},
+    "Scope": "local"
+  }
+]

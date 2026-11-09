@@ -1,0 +1,36 @@
+CreatedAt: "2026-11-09T16:11:42.709309344Z"
+DesiredState: shutdown
+ID: oduuqd5dljm8ftogxkfudnca7
+Labels: {}
+NodeID: qs531opjwnjwvvp41wysh44rv
+ServiceID: hf3owhos9gseipaonaxcdk88h
+Slot: 1
+Spec:
+  ContainerSpec:
+    DNSConfig: {}
+    Image: no-such-registry.invalid/ghost:1
+    Init: false
+    Isolation: default
+  ForceUpdate: 0
+  Placement: {}
+  Resources:
+    Limits: {}
+    Reservations: {}
+  RestartPolicy:
+    Condition: none
+    Delay: 5000000000
+    MaxAttempts: 0
+Status:
+  ContainerStatus:
+    ContainerID: ""
+    ExitCode: 0
+    PID: 0
+  Err: 'Get "https://no-such-registry.invalid/v2/": Forbidden'
+  Message: preparing
+  PortStatus: {}
+  State: rejected
+  Timestamp: "2026-11-09T16:11:43.186503433Z"
+UpdatedAt: "2026-11-09T16:11:43.461936512Z"
+Version:
+  Index: 47
+Volumes: null

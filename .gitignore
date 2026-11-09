@@ -8,3 +8,5 @@ pty_session.raw
 timing.log
 __pycache__/
 .venv/
+/dist/
+/THIRD_PARTY_LICENSES.txt

@@ -2,14 +2,17 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/muesli/termenv"
 
-	"swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/config"
 )
 
 func TestInitialViewIsServicesWithHeader(t *testing.T) {
@@ -840,4 +843,347 @@ func TestAliasesDoesNotStack(t *testing.T) {
 	if len(a.stack) != m {
 		t.Fatalf("help stacked")
 	}
+}
+
+// Whatever -c asks for, the program must come up with a view to stand on.
+// help, aliases, a typo and a context switch cannot be the root themselves:
+// they run on top of the default view, as k9s falls back to its default.
+func TestEveryStartCommandLeavesAView(t *testing.T) {
+	cases := []struct {
+		cmd       string
+		root, top string // crumbs
+		modal     bool   // an error dialog is open
+	}{
+		{"", "services", "services", false},
+		{"services", "services", "services", false},
+		{"svc shop", "services", "services", false},
+		{"nodes", "nodes", "nodes", false},
+		{"events", "events", "events", false},
+		{"help", "services", "help", false},
+		{"?", "services", "help", false},
+		{"aliases", "services", "aliases", false},
+		{"a", "services", "aliases", false},
+		{"nosuchcommand", "services", "services", true},
+		{"nosuchcommand shop", "services", "services", true},
+		{"ctx lab", "services", "services", false},
+	}
+	for _, c := range cases {
+		t.Run(c.cmd, func(t *testing.T) {
+			opt := testOpts()
+			opt.Command = c.cmd
+			a := New(opt)
+			a.w, a.h = 140, 38
+			a.drain(a.Init())
+			if len(a.stack) == 0 {
+				t.Fatal("no view after Init")
+			}
+			if got := a.stack[0].crumb(); got != c.root {
+				t.Errorf("root view = %q, want %q", got, c.root)
+			}
+			if got := a.view().crumb(); got != c.top {
+				t.Errorf("top view = %q, want %q", got, c.top)
+			}
+			if (a.modal != nil) != c.modal {
+				t.Errorf("error dialog open = %v, want %v", a.modal != nil, c.modal)
+			}
+			// what arrives after the start must be harmless
+			for _, m := range []tea.Msg{tickMsg{}, summaryTick{}, refreshMsg{}, actionMsg{msg: "x"}, execDoneMsg{}} {
+				a.Update(m)
+			}
+			_ = a.screenText()
+		})
+	}
+
+	t.Run("ctx lab switches the context", func(t *testing.T) {
+		opt := testOpts()
+		opt.Command = "ctx lab"
+		a := New(opt)
+		a.w, a.h = 140, 38
+		a.drain(a.Init())
+		if a.be.ContextName() != "lab" {
+			t.Errorf("context = %q, want lab", a.be.ContextName())
+		}
+	})
+}
+
+// The messages that keep arriving (ticks, results of actions) must survive an
+// app that has no view yet.
+func TestMessagesAreHarmlessWithoutAView(t *testing.T) {
+	a := New(testOpts())
+	a.w, a.h = 140, 38
+	for _, m := range []tea.Msg{tickMsg{}, summaryTick{}, refreshMsg{}, actionMsg{msg: "x"}, actionMsg{err: fmt.Errorf("boom")}, execDoneMsg{}, execDoneMsg{err: fmt.Errorf("boom")}} {
+		a.Update(m)
+	}
+	a.press("esc", ":", "?", "ctrl+r")
+	if s := a.screenText(); !strings.Contains(s, "Revision") {
+		t.Errorf("expected the splash screen, got:\n%s", s)
+	}
+}
+
+// Marking nodes and draining them asks once and drains every marked node. It
+// used to ask twice: the second dialog was opened by the first one's button
+// and closed again by the key handler, so nothing happened at all.
+func TestBulkDrainAsksOnceAndDrainsEveryMarkedNode(t *testing.T) {
+	opt := testOpts()
+	rec := &recorder{Backend: opt.Backend}
+	opt.Backend = rec
+	a := newTestAppOpts(t, opt, 140, 38)
+	a.command("nodes")
+	a.press("down", "down", "down") // worker-1
+	a.press("space", "space")       // mark worker-1 and worker-2
+	a.press("r")
+	mustContain(t, a.screenText(), "<Drain>", "Drain 2 nodes?")
+	a.press("tab", "enter")
+	if a.modal != nil {
+		t.Fatalf("a second dialog was left open: %T", a.modal)
+	}
+	if len(rec.calls) != 2 {
+		t.Fatalf("backend calls = %v, want a drain for each of the 2 marked nodes", rec.calls)
+	}
+	a.refreshNow()
+	drained := map[string]bool{}
+	for _, r := range a.view().(*tableView).rows {
+		if r.cells[ndAvail] == "drain" {
+			drained[r.name] = true
+		}
+	}
+	for _, want := range []string{"worker-1", "worker-2", "worker-3"} { // worker-3 was drained in the seed
+		if !drained[want] {
+			t.Errorf("%s is not drained: %v", want, drained)
+		}
+	}
+	mustContain(t, a.screenText(), "Drained 2 nodes")
+}
+
+func TestADialogOpenedByAButtonIsNotClosedWithIt(t *testing.T) {
+	a := newTestApp(t, 100, 30)
+	a.confirm("First", "first?", func() tea.Cmd { return a.confirm("Second", "second?", nil) })
+	a.press("tab", "enter")
+	d, ok := a.modal.(*dialog)
+	if !ok || d.title != "Second" {
+		t.Fatalf("modal = %#v, want the second dialog", a.modal)
+	}
+	a.press("esc")
+	if a.modal != nil {
+		t.Error("esc must close the dialog that is open")
+	}
+}
+
+// docker service rm a b c goes on after a failure; so do bulk actions here,
+// and they say what failed instead of stopping at the first error.
+func TestBulkDeleteGoesOnAfterAFailure(t *testing.T) {
+	opt := testOpts()
+	rec := &recorder{Backend: opt.Backend, fail: map[string]error{}}
+	opt.Backend = rec
+	a := newTestAppOpts(t, opt, 140, 38)
+	a.command("svc /shop_(api|cache|db)")
+	tv := a.view().(*tableView)
+	if len(tv.rows) != 3 {
+		t.Fatalf("%d rows, want 3", len(tv.rows))
+	}
+	rec.fail[tv.rows[0].id] = fmt.Errorf("update out of sequence")
+	a.press("space", "space", "space")
+	a.press("ctrl+d")
+	mustContain(t, a.screenText(), "Delete 3 services?")
+	a.press("tab", "enter")
+	if len(rec.calls) != 3 {
+		t.Fatalf("backend calls = %v, want an attempt for all 3", rec.calls)
+	}
+	if msg := a.flashMsg.text; !strings.Contains(msg, "1 of 3 failed") || !strings.Contains(msg, "update out of sequence") {
+		t.Errorf("flash = %q, want the failure reported", msg)
+	}
+	a.refreshNow()
+	left := map[string]bool{}
+	for _, r := range a.view().(*tableView).rows {
+		left[r.name] = true
+	}
+	if len(left) != 1 {
+		t.Errorf("rows left = %v, want only the one that failed to go", left)
+	}
+}
+
+func TestTextViewErrorRemovesOnlyItself(t *testing.T) {
+	load := func(context.Context) (string, error) { return "", fmt.Errorf("gone") }
+
+	// the usual case: it is on top and goes back to the table
+	a := newTestApp(t, 120, 30)
+	root := a.view()
+	tv := newTextView(a, "describe", "ghost", load)
+	a.push(tv)
+	a.Update(textMsg{vid: tv.vid, err: fmt.Errorf("gone")})
+	if a.view() != root || len(a.stack) != 1 {
+		t.Errorf("stack after the error = %d views, top %T", len(a.stack), a.view())
+	}
+
+	// help was opened over it while it loaded: help must stay
+	tv = newTextView(a, "describe", "ghost", load)
+	a.push(tv)
+	a.push(newHelpView(a))
+	a.Update(textMsg{vid: tv.vid, err: fmt.Errorf("gone")})
+	if _, ok := a.view().(*helpView); !ok {
+		t.Fatalf("top = %T, want the help view to stay", a.view())
+	}
+	for _, v := range a.stack {
+		if v == view(tv) {
+			t.Error("the failed text view is still on the stack")
+		}
+	}
+}
+
+// Rows of the events view are identified by the number an event arrived
+// under. Once the buffer is full, one new event used to rename every row.
+func TestEventRowsKeepTheirIdentityWhenOldEventsRollOff(t *testing.T) {
+	a := newTestApp(t, 140, 38)
+	base := fixedNow.Add(-time.Hour)
+	add := func(i int) {
+		a.Update(eventMsg{ev: api.Event{Time: base.Add(time.Duration(i) * time.Second), Type: "service", Action: "update", Name: fmt.Sprintf("svc-%d", i)}})
+	}
+	for i := 0; i < maxEvents; i++ {
+		add(i)
+	}
+	a.command("events")
+	tv := a.view().(*tableView)
+	tv.cursor = 100 // somewhere in the middle: the oldest row is about to roll off
+	tv.syncSel()
+	selected := tv.selected().name
+
+	add(maxEvents) // the oldest event rolls off
+	a.refreshNow()
+	changed := 0
+	for _, r := range tv.rows {
+		if r.delta != roleStd {
+			changed++
+		}
+	}
+	if changed != 1 {
+		t.Errorf("%d rows flagged as new or changed after a single event, want 1", changed)
+	}
+	if got := tv.selected(); got == nil || got.name != selected {
+		t.Errorf("the selection moved off %s", selected)
+	}
+}
+
+func TestLogRestartIgnoresMessagesFromTheOldStream(t *testing.T) {
+	a := newTestApp(t, 140, 30)
+	a.command("svc /shop_web")
+	a.press("l")
+	lv := a.view().(*logView)
+	old := lv.gen
+	a.press("1") // another time range restarts the stream
+	if lv.gen == old {
+		t.Fatal("a restart must start a new run of the stream")
+	}
+	n := len(lv.lines)
+	a.Update(logMsg{vid: lv.vid, gen: old, lines: []api.LogLine{{Text: "stale"}}})
+	a.Update(logEndMsg{vid: lv.vid, gen: old, err: fmt.Errorf("the old stream failed")})
+	if len(lv.lines) != n || lv.ended || lv.err != nil {
+		t.Errorf("a message from the old stream got through: %d lines (was %d), ended=%v, err=%v", len(lv.lines), n, lv.ended, lv.err)
+	}
+	a.Update(logMsg{vid: lv.vid, gen: lv.gen, lines: []api.LogLine{{Text: "fresh"}}})
+	if len(lv.lines) != n+1 {
+		t.Error("a message from the current stream must be kept")
+	}
+}
+
+// A service that writes huge lines must not be able to exhaust memory
+// through the viewer, whatever the line budget says.
+func TestLogBufferIsBoundedInBytes(t *testing.T) {
+	a := newTestApp(t, 140, 30)
+	a.command("svc /shop_web")
+	a.press("l")
+	lv := a.view().(*logView)
+	lv.bufMax = 1_000_000 // the line budget is not what limits here
+	big := strings.Repeat("x", 1<<20)
+	for i := 0; i < 100; i++ {
+		a.Update(logMsg{vid: lv.vid, gen: lv.gen, lines: []api.LogLine{{Text: big}}})
+	}
+	if lv.bytes > maxLogBytes {
+		t.Errorf("the view holds %d MiB of text, limit %d MiB", lv.bytes>>20, maxLogBytes>>20)
+	}
+	if len(lv.lines) == 0 || lv.lines[len(lv.lines)-1].Text != big {
+		t.Error("the newest line must be kept")
+	}
+	sum := 0
+	for _, l := range lv.lines {
+		sum += len(l.Text)
+	}
+	if sum != lv.bytes {
+		t.Errorf("byte accounting drifted: counted %d, summed %d", lv.bytes, sum)
+	}
+}
+
+// int(hash) goes negative for about half the names where int is 32 bits wide
+// (GOARCH=386, linux/arm); the CI runs this on 386 too.
+func TestLogPrefixColourIsAlwaysAPaletteEntry(t *testing.T) {
+	a := newTestApp(t, 100, 20)
+	a.command("svc /shop_web")
+	a.press("l")
+	lv := a.view().(*logView)
+	pal := map[color]bool{}
+	for _, c := range a.th.logs.prefix {
+		pal[c] = true
+	}
+	for i := 0; i < 5000; i++ {
+		if c := lv.prefixColor(fmt.Sprintf("shop_web.%d", i)); !pal[c] {
+			t.Fatalf("prefixColor(%d) = %#x, not in the palette", i, int(c))
+		}
+	}
+}
+
+// Read-only is not only a matter of hiding keys: the backend refuses changes,
+// whatever asks, and still does after the context is switched.
+func TestReadOnlyIsEnforcedByTheBackend(t *testing.T) {
+	opt := testOpts()
+	opt.ReadOnly = true
+	a := newTestAppOpts(t, opt, 140, 38)
+	refused := func() {
+		t.Helper()
+		ctx := context.Background()
+		for name, err := range map[string]error{
+			"Remove":       a.be.Remove(ctx, api.KindService, "x"),
+			"ScaleService": a.be.ScaleService(ctx, "x", 1),
+			"RemoveStack":  a.be.RemoveStack(ctx, "shop"),
+		} {
+			if !errors.Is(err, api.ErrReadOnly) {
+				t.Errorf("%s on %s: %v, want ErrReadOnly", name, a.be.ContextName(), err)
+			}
+		}
+	}
+	refused()
+	a.command("ctx lab")
+	if a.be.ContextName() != "lab" {
+		t.Fatalf("context = %q", a.be.ContextName())
+	}
+	refused()
+	a.command("nodes")
+	mustContain(t, a.screenText(), "nodes(all)[7]", "lab [RO]") // reading still works
+}
+
+func TestReadOnlyFromTheConfigFileWrapsTheBackendToo(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.ReadOnly = true
+	opt := testOpts()
+	opt.Config = cfg
+	a := newTestAppOpts(t, opt, 140, 38)
+	if err := a.be.Remove(context.Background(), api.KindService, "x"); !errors.Is(err, api.ErrReadOnly) {
+		t.Errorf("Remove: %v, want ErrReadOnly", err)
+	}
+}
+
+// A shell changes whatever it is used for: read-only mode offers none, and
+// says why if it is asked for anyway.
+func TestReadOnlyModeHasNoShell(t *testing.T) {
+	opt := testOpts()
+	opt.ReadOnly = true
+	ro := newTestAppOpts(t, opt, 140, 38)
+	ro.command("tasks")
+	mustNotContain(t, ro.screenText(), "Shell")
+	ro.press("s")
+	if got := ro.flashMsg.text; got != "Command disabled in read-only mode" {
+		t.Errorf("the shell key flashed %q, want it refused", got)
+	}
+
+	rw := newTestApp(t, 140, 38)
+	rw.command("tasks")
+	mustContain(t, rw.screenText(), "Shell")
 }

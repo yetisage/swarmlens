@@ -1,0 +1,11 @@
+CreatedAt: "2026-11-09T16:11:40.178961166Z"
+ID: ulca27up73bcm61rte609itl4
+Spec:
+    Data: |
+        key=value
+    Labels:
+        com.docker.stack.namespace: shop
+    Name: shop_appcfg
+UpdatedAt: "2026-11-09T16:11:40.178961166Z"
+Version:
+    Index: 16

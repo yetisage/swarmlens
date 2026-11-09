@@ -12,7 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/api"
 )
 
 // logView follows the logs of a service (all its tasks, each line tagged
@@ -27,6 +27,8 @@ type logView struct {
 
 	lines  []api.LogLine
 	bufMax int
+	bytes  int // text held in lines
+	gen    int // which run of the stream is current
 	err    error
 	ended  bool
 
@@ -80,10 +82,11 @@ func (v *logView) stop() {
 // begin (re)starts the stream.
 func (v *logView) begin() tea.Cmd {
 	v.stop()
-	v.lines, v.err, v.ended = nil, nil, false
+	v.lines, v.bytes, v.err, v.ended = nil, 0, nil, false
+	v.gen++
 	ctx, cancel := context.WithCancel(context.Background())
 	v.cancel = cancel
-	be, target, vid, p := v.a.be, v.target, v.vid, v.a.program
+	be, target, vid, gen, p := v.a.be, v.target, v.vid, v.gen, v.a.program
 	opts := api.LogOptions{Tail: v.tail, Since: v.since, Follow: true}
 	if v.since > 0 {
 		opts.Tail = 0
@@ -95,16 +98,16 @@ func (v *logView) begin() tea.Cmd {
 			opts.Follow = false
 			err := be.Logs(ctx, target, opts, func(b []api.LogLine) { all = append(all, b...) })
 			if err != nil {
-				return logEndMsg{vid: vid, err: err}
+				return logEndMsg{vid: vid, gen: gen, err: err}
 			}
-			return logMsg{vid: vid, lines: all}
+			return logMsg{vid: vid, gen: gen, lines: all}
 		}
 	}
 	return func() tea.Msg {
 		go func() {
-			err := be.Logs(ctx, target, opts, func(b []api.LogLine) { p.Send(logMsg{vid: vid, lines: b}) })
+			err := be.Logs(ctx, target, opts, func(b []api.LogLine) { p.Send(logMsg{vid: vid, gen: gen, lines: b}) })
 			if ctx.Err() == nil {
-				p.Send(logEndMsg{vid: vid, err: err})
+				p.Send(logEndMsg{vid: vid, gen: gen, err: err})
 			}
 		}()
 		return nil
@@ -114,12 +117,18 @@ func (v *logView) begin() tea.Cmd {
 func (v *logView) handle(msg tea.Msg) tea.Cmd {
 	switch m := msg.(type) {
 	case logMsg:
-		v.lines = append(v.lines, m.lines...)
-		if over := len(v.lines) - v.bufMax; over > 0 {
-			v.lines = v.lines[over:]
-			v.top = max(v.top-over, 0)
+		if m.gen != v.gen {
+			return nil // from a stream that has been restarted since
 		}
+		for _, l := range m.lines {
+			v.bytes += len(l.Text)
+		}
+		v.lines = append(v.lines, m.lines...)
+		v.trim()
 	case logEndMsg:
+		if m.gen != v.gen {
+			return nil
+		}
 		v.ended = true
 		if m.err != nil {
 			v.err = m.err
@@ -127,6 +136,29 @@ func (v *logView) handle(msg tea.Msg) tea.Cmd {
 		}
 	}
 	return nil
+}
+
+// maxLogBytes bounds the text a log view keeps, whatever the line budget is:
+// a service that writes huge lines must not be able to exhaust memory.
+const maxLogBytes = 32 << 20
+
+// trim drops the oldest lines beyond the line budget and the byte budget.
+func (v *logView) trim() {
+	drop := max(len(v.lines)-v.bufMax, 0)
+	freed := 0
+	for i := 0; i < drop; i++ {
+		freed += len(v.lines[i].Text)
+	}
+	for drop < len(v.lines)-1 && v.bytes-freed > maxLogBytes {
+		freed += len(v.lines[drop].Text)
+		drop++
+	}
+	if drop == 0 {
+		return
+	}
+	v.lines = v.lines[drop:]
+	v.bytes -= freed
+	v.top = max(v.top-drop, 0)
 }
 
 func (v *logView) title() []seg {
@@ -279,13 +311,13 @@ func (v *logView) plainLine(l api.LogLine) string {
 }
 
 func (v *logView) save() {
-	dir := stateDir("logs", sanitize(v.a.be.ContextName()))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dir, err := stateDir("logs", sanitize(v.a.be.ContextName()))
+	if err != nil {
 		v.a.flash(flashErr, err.Error())
 		return
 	}
 	path := filepath.Join(dir, fmt.Sprintf("%s-%d.log", sanitize(v.target.Name), time.Now().Unix()))
-	if err := os.WriteFile(path, []byte(v.plainText()), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(v.plainText()), 0o600); err != nil {
 		v.a.flash(flashErr, err.Error())
 		return
 	}
@@ -300,7 +332,9 @@ func (v *logView) prefixColor(source string) color {
 	pal := v.a.th.logs.prefix
 	h := fnv.New32a()
 	_, _ = h.Write([]byte(source))
-	return pal[int(h.Sum32())%len(pal)]
+	// uint32 arithmetic: converting the sum to int first goes negative for
+	// about half the names where int is 32 bits wide
+	return pal[h.Sum32()%uint32(len(pal))]
 }
 
 func (v *logView) lineSegs(l api.LogLine) []seg {

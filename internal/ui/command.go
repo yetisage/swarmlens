@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/api"
 )
 
 var (
@@ -40,6 +40,22 @@ func (a *app) resolve(word string) (*resource, bool) {
 		}
 	}
 	return nil, false
+}
+
+// commandOpensView reports whether a command line replaces the stack with a
+// resource table, as opposed to help, aliases, quitting or switching context.
+func (a *app) commandOpensView(line string) bool {
+	fields := strings.Fields(line)
+	if len(fields) == 0 {
+		return false
+	}
+	word := strings.ToLower(fields[0])
+	switch {
+	case in(word, quitWords), in(word, helpWords), in(word, aliasWords), in(word, contextWords) && len(fields) > 1:
+		return false
+	}
+	_, ok := a.resolve(word)
+	return ok
 }
 
 // commandWords are all the names the prompt completes.
@@ -74,12 +90,12 @@ func (a *app) runCommand(line string, record bool) tea.Cmd {
 	case in(word, quitWords):
 		return a.quit()
 	case in(word, helpWords):
-		if _, ok := a.view().(*helpView); ok {
+		if _, ok := a.top().(*helpView); ok {
 			return nil
 		}
 		return a.push(newHelpView(a))
 	case in(word, aliasWords):
-		if a.view().crumb() == "aliases" {
+		if v := a.top(); v != nil && v.crumb() == "aliases" {
 			return nil
 		}
 		return a.push(a.aliasView())

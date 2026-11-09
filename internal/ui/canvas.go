@@ -45,14 +45,9 @@ type style struct {
 }
 
 func (s style) withFg(c color) style { s.fg = c; return s }
-func (s style) withBg(c color) style { s.bg = c; return s }
 func (s style) bold() style          { s.attrs |= attrBold; return s }
-func (s style) dim() style           { s.attrs |= attrDim; return s }
 func (s style) underline() style     { s.attrs |= attrUnderline; return s }
 func (s style) reverse() style       { s.attrs |= attrReverse; return s }
-
-// fgStyle is a convenience for "this colour on the default background".
-func fgStyle(c color) style { return style{fg: c, bg: noColor} }
 
 // cell is one terminal cell. A wide character occupies a left cell (w=2)
 // and a right cell (w=0, empty text).
@@ -395,6 +390,11 @@ func (c *canvas) colorParam(col color, bg bool) string {
 		}
 		return "38;5;" + strconv.Itoa(n)
 	}
-	// termenv downgrades to the 256 or 16 colour palette as needed.
-	return c.profile.Color(fmt.Sprintf("#%06x", int(col))).Sequence(bg)
+	// termenv downgrades to the 256 or 16 colour palette as needed. It answers
+	// nil for a value it cannot parse, which must not take the UI down.
+	tc := c.profile.Color(fmt.Sprintf("#%06x", int(col)&0xffffff))
+	if tc == nil {
+		return ""
+	}
+	return tc.Sequence(bg)
 }

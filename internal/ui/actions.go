@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,7 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/muesli/termenv"
 
-	"swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/api"
 )
 
 // ---- shared bindings ----
@@ -68,12 +69,9 @@ func deleteAct(v *tableView, kind api.Kind, noun string) action {
 		be := v.a.be
 		return v.a.confirm("Delete", msg, func() tea.Cmd {
 			return v.a.run(done, func(ctx context.Context) error {
-				for _, r := range targets {
-					if err := be.Remove(ctx, kind, r.id); err != nil {
-						return fmt.Errorf("%s: %w", r.name, err)
-					}
-				}
-				return nil
+				return forEach(ctx, targets, func(ctx context.Context, r *row) error {
+					return be.Remove(ctx, kind, r.id)
+				})
 			})
 		})
 	})
@@ -98,9 +96,29 @@ func (a *app) run(ok string, fn func(ctx context.Context) error) tea.Cmd {
 	}
 }
 
-// bulk applies a mutation to the marked rows, or to the selected one,
-// asking first when more than one object is involved.
-func (a *app) bulk(v *tableView, verb, past string, fn func(ctx context.Context, be api.Backend, r *row) error) tea.Cmd {
+// forEach applies fn to every target. Like `docker service rm a b c` it goes
+// on after a failure, so one stale row does not leave the rest untouched, and
+// it reports the failures together.
+func forEach(ctx context.Context, targets []*row, fn func(ctx context.Context, r *row) error) error {
+	var errs []error
+	for _, r := range targets {
+		if err := fn(ctx, r); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", r.name, err))
+		}
+	}
+	switch {
+	case len(errs) == 0:
+		return nil
+	case len(targets) == 1:
+		return errs[0]
+	}
+	return fmt.Errorf("%d of %d failed: %w", len(errs), len(targets), errors.Join(errs...))
+}
+
+// bulk applies a mutation to the marked rows, or to the selected one. It asks
+// first when more than one object is involved, or, with ask, when the action
+// is disruptive enough to deserve the question even for a single object.
+func (a *app) bulk(v *tableView, verb, past, ask string, fn func(ctx context.Context, be api.Backend, r *row) error) tea.Cmd {
 	targets := v.targets()
 	if len(targets) == 0 {
 		return nil
@@ -112,16 +130,14 @@ func (a *app) bulk(v *tableView, verb, past string, fn func(ctx context.Context,
 			msg = fmt.Sprintf("%s %d %s", past, len(targets), v.res.key)
 		}
 		return a.run(msg, func(ctx context.Context) error {
-			for _, r := range targets {
-				if err := fn(ctx, be, r); err != nil {
-					return fmt.Errorf("%s: %w", r.name, err)
-				}
-			}
-			return nil
+			return forEach(ctx, targets, func(ctx context.Context, r *row) error { return fn(ctx, be, r) })
 		})
 	}
-	if len(targets) > 1 {
-		return a.confirm(verb, fmt.Sprintf("%s %d %s?", verb, len(targets), v.res.key), do)
+	if ask == "" && len(targets) > 1 {
+		ask = fmt.Sprintf("%s %d %s?", verb, len(targets), v.res.key)
+	}
+	if ask != "" {
+		return a.confirm(verb, ask, do)
 	}
 	return do()
 }
@@ -199,6 +215,9 @@ func (a *app) copy(text string) {
 // the daemon belongs to can be reached.
 func (a *app) shell(t api.Task) tea.Cmd {
 	switch {
+	case a.readOnly:
+		a.flash(flashWarn, "Command disabled in read-only mode")
+		return nil
 	case isSimulated(a.be):
 		a.flash(flashWarn, "Shells are not available in demo mode")
 		return nil
@@ -248,12 +267,14 @@ func (a *app) editService(s api.Service) tea.Cmd {
 		if err != nil {
 			return editMsg{svc: s, err: err}
 		}
+		// the spec may hold secrets: CreateTemp makes the file private (0600)
 		f, err := os.CreateTemp("", "swarmlens-"+sanitize(s.Name)+"-*.yaml")
 		if err != nil {
 			return editMsg{svc: s, err: err}
 		}
-		defer f.Close()
-		if _, err := f.WriteString(y); err != nil {
+		_, werr := f.WriteString(y)
+		if err := errors.Join(werr, f.Close()); err != nil {
+			_ = os.Remove(f.Name())
 			return editMsg{svc: s, err: err}
 		}
 		return editMsg{svc: s, path: f.Name(), orig: y, version: version}
@@ -280,7 +301,7 @@ func (a *app) onEdit(m editMsg) tea.Cmd {
 }
 
 func (a *app) onEditDone(m editDoneMsg) tea.Cmd {
-	defer os.Remove(m.path)
+	defer func() { _ = os.Remove(m.path) }()
 	if m.err != nil {
 		a.flash(flashErr, "Editor failed: "+m.err.Error())
 		return nil

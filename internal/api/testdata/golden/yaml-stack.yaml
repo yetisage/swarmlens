@@ -1,0 +1,19 @@
+name: shop
+services:
+  - name: shop_api
+    mode: replicated
+    replicas: 2/2
+    image: hello:1
+  - name: shop_worker
+    mode: replicated
+    replicas: 1/1
+    image: hello:1
+networks:
+  - shop_back
+  - shop_default
+volumes:
+  - shop_data
+secrets:
+  - shop_dbpass
+configs:
+  - shop_appcfg

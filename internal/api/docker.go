@@ -13,13 +13,16 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
-	"github.com/docker/docker/api/types/swarm"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/swarm"
+	"github.com/moby/moby/client"
+	"github.com/moby/moby/client/pkg/versions"
 )
 
 // API is the Docker Engine implementation of Backend.
@@ -28,10 +31,13 @@ type API struct {
 	ctxName  string
 	endpoint string
 
-	mu              sync.RWMutex
-	nodeNames       map[string]string // node id -> hostname
-	nodeNamesAt     time.Time
-	swarmContainers map[string]bool // container ids known to belong to swarm tasks
+	reconnect backoffPolicy // how the event stream reconnects
+
+	negotiated atomic.Bool // the API version has been agreed with the daemon
+
+	mu          sync.RWMutex
+	nodeNames   map[string]string // node id -> hostname
+	nodeNamesAt time.Time
 }
 
 var _ Backend = (*API)(nil)
@@ -67,11 +73,11 @@ func Connect(opts ConnectOptions) (*API, error) {
 // NewWithClient wraps an existing client (used by tests).
 func NewWithClient(cli *client.Client) *API {
 	return &API{
-		cli:             cli,
-		ctxName:         "default",
-		endpoint:        cli.DaemonHost(),
-		nodeNames:       map[string]string{},
-		swarmContainers: map[string]bool{},
+		cli:       cli,
+		ctxName:   "default",
+		endpoint:  cli.DaemonHost(),
+		reconnect: defaultBackoff,
+		nodeNames: map[string]string{},
 	}
 }
 
@@ -107,22 +113,34 @@ func resolveEndpoint(opts ConnectOptions) (endpoint, error) {
 	}
 	name := opts.Context
 	if name == "" {
-		if h := os.Getenv("DOCKER_HOST"); h != "" {
-			ep := endpoint{name: "default", host: h}
-			ep.fromEnvTLS()
-			return ep, nil
+		if os.Getenv("DOCKER_HOST") != "" {
+			return defaultEndpoint(), nil
 		}
 		name = currentContextName()
 	}
 	if name == "" || name == "default" {
-		ep := endpoint{name: "default", host: client.DefaultDockerHost}
-		ep.fromEnvTLS()
-		return ep, nil
+		return defaultEndpoint(), nil
 	}
 	return contextEndpoint(name)
 }
 
-// fromEnvTLS applies DOCKER_TLS_VERIFY / DOCKER_CERT_PATH.
+// defaultEndpoint is the "default" docker context: DOCKER_HOST and its TLS
+// variables, else the local socket. Asking for that context by name (--context
+// default, :ctx default) must land here too, as with the docker CLI.
+func defaultEndpoint() endpoint {
+	host := os.Getenv("DOCKER_HOST")
+	if host == "" {
+		host = client.DefaultDockerHost
+	}
+	ep := endpoint{name: "default", host: host}
+	ep.fromEnvTLS()
+	return ep
+}
+
+// fromEnvTLS applies DOCKER_TLS_VERIFY / DOCKER_CERT_PATH. The CA is always
+// used (and an unreadable one is an error, so verification is never quietly
+// dropped); the client certificate only if it is there, because a daemon
+// that does not ask for one is a normal setup.
 func (e *endpoint) fromEnvTLS() {
 	if os.Getenv("DOCKER_TLS_VERIFY") == "" {
 		return
@@ -131,23 +149,32 @@ func (e *endpoint) fromEnvTLS() {
 	if dir == "" {
 		dir = dockerConfigDir()
 	}
-	e.caFile = dir + "/ca.pem"
-	e.certFile = dir + "/cert.pem"
-	e.keyFile = dir + "/key.pem"
+	e.caFile = filepath.Join(dir, "ca.pem")
+	cert, key := filepath.Join(dir, "cert.pem"), filepath.Join(dir, "key.pem")
+	if fileExists(cert) && fileExists(key) {
+		e.certFile, e.keyFile = cert, key
+	}
 }
 
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// newClient builds the Engine API client. It negotiates the API version with
+// the daemon on its first request, which is the default of this client.
 func newClient(ep endpoint) (*client.Client, error) {
-	opts := []client.Opt{client.WithAPIVersionNegotiation()}
+	var opts []client.Opt
 
 	switch {
 	case strings.HasPrefix(ep.host, "ssh://"):
-		dial, err := sshDialer(ep.host)
+		spec, err := parseSSHURL(ep.host)
 		if err != nil {
 			return nil, err
 		}
 		// Same trick as the docker CLI's connection helper: the host is a
 		// placeholder, the dialer does the real work.
-		opts = append(opts, client.WithHost("http://docker.example.com"), client.WithDialContext(dial))
+		opts = append(opts, client.WithHost("http://docker.example.com"), client.WithDialContext(sshDialer(spec)))
 
 	case ep.caFile != "" || ep.certFile != "" || ep.skipTLSVerify:
 		cfg, err := tlsConfig(ep)
@@ -165,7 +192,7 @@ func newClient(ep endpoint) (*client.Client, error) {
 		}
 		opts = append(opts, client.WithHost(host))
 	}
-	return client.NewClientWithOpts(opts...)
+	return client.New(opts...)
 }
 
 func tlsConfig(ep endpoint) (*tls.Config, error) {
@@ -191,18 +218,55 @@ func tlsConfig(ep endpoint) (*tls.Config, error) {
 	return cfg, nil
 }
 
+// Close implements Backend: it lets go of the idle connections (and, for an
+// ssh:// endpoint, of the ssh processes behind them).
+func (a *API) Close() error { return a.cli.Close() }
+
 // ContextName implements Backend.
 func (a *API) ContextName() string { return a.ctxName }
 
 // Endpoint implements Backend.
 func (a *API) Endpoint() string { return a.endpoint }
 
+// The oldest daemon swarmlens works with. The running count of a service, which
+// the services view and the header show, comes from the service status that the
+// engine reports from API 1.41, Docker Engine 20.10; the client itself goes down
+// to API 1.40. The README says the same.
+const (
+	minAPIVersion   = "1.41"
+	minDockerEngine = "20.10"
+)
+
+// negotiate agrees an API version with the daemon before the first request and
+// refuses a daemon that is older than swarmlens works with. The client
+// negotiates by itself, but for a daemon older than it supports it keeps quiet
+// and carries on with its newest version, which that daemon rejects with an
+// error that does not say why. Any other trouble with the ping is left to the
+// request that follows, which reports it as it always has.
+func (a *API) negotiate(ctx context.Context) error {
+	if a.negotiated.Load() {
+		return nil
+	}
+	res, err := a.cli.Ping(ctx, client.PingOptions{NegotiateAPIVersion: true})
+	if res.APIVersion != "" && versions.LessThan(res.APIVersion, minAPIVersion) {
+		return fmt.Errorf("swarmlens needs Docker Engine %s or newer: this daemon speaks API %s, the minimum is %s", minDockerEngine, res.APIVersion, minAPIVersion)
+	}
+	if err == nil {
+		a.negotiated.Store(true)
+	}
+	return nil
+}
+
 // Summary implements Backend.
 func (a *API) Summary(ctx context.Context) (*Summary, error) {
-	info, err := a.cli.Info(ctx)
+	if err := a.negotiate(ctx); err != nil {
+		return nil, err
+	}
+	res, err := a.cli.Info(ctx, client.InfoOptions{})
 	if err != nil {
 		return nil, err
 	}
+	info := res.Info
 	s := &Summary{
 		Context:       a.ctxName,
 		Endpoint:      a.endpoint,
@@ -213,7 +277,7 @@ func (a *API) Summary(ctx context.Context) (*Summary, error) {
 		Nodes:         info.Swarm.Nodes,
 		Managers:      info.Swarm.Managers,
 	}
-	if v, err := a.cli.ServerVersion(ctx); err == nil {
+	if v, err := a.cli.ServerVersion(ctx, client.ServerVersionOptions{}); err == nil {
 		s.APIVersion = v.APIVersion
 	}
 	if info.Swarm.LocalNodeState != swarm.LocalNodeStateActive {
@@ -232,9 +296,9 @@ func (a *API) Summary(ctx context.Context) (*Summary, error) {
 
 	// Cluster-wide health numbers for the header. Failures here are not
 	// fatal: the header just shows what it has.
-	if nodes, err := a.cli.NodeList(ctx, swarm.NodeListOptions{}); err == nil {
-		s.Nodes, s.Managers = len(nodes), 0
-		for _, n := range nodes {
+	if nodes, err := a.cli.NodeList(ctx, client.NodeListOptions{}); err == nil {
+		s.Nodes, s.Managers = len(nodes.Items), 0
+		for _, n := range nodes.Items {
 			if n.Status.State == swarm.NodeStateReady {
 				s.NodesReady++
 			}
@@ -249,10 +313,10 @@ func (a *API) Summary(ctx context.Context) (*Summary, error) {
 			}
 		}
 	}
-	if svcs, err := a.cli.ServiceList(ctx, swarm.ServiceListOptions{Status: true}); err == nil {
-		s.Services = len(svcs)
+	if svcs, err := a.cli.ServiceList(ctx, client.ServiceListOptions{Status: true}); err == nil {
+		s.Services = len(svcs.Items)
 		stacks := map[string]bool{}
-		for _, raw := range svcs {
+		for _, raw := range svcs.Items {
 			sv := toService(raw)
 			if sv.Stack != "" {
 				stacks[sv.Stack] = true
@@ -297,15 +361,15 @@ func (a *API) nodeNameMap(ctx context.Context, maxAge time.Duration) map[string]
 	}
 	a.mu.RUnlock()
 
-	nodes, err := a.cli.NodeList(ctx, swarm.NodeListOptions{})
+	res, err := a.cli.NodeList(ctx, client.NodeListOptions{})
 	if err != nil {
 		// A stale cache beats failing the whole call.
 		a.mu.RLock()
 		defer a.mu.RUnlock()
 		return copyMap(a.nodeNames)
 	}
-	m := make(map[string]string, len(nodes))
-	for _, n := range nodes {
+	m := make(map[string]string, len(res.Items))
+	for _, n := range res.Items {
 		m[n.ID] = n.Description.Hostname
 	}
 	a.setNodeNames(m)
@@ -325,24 +389,6 @@ func copyMap(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
-}
-
-// trackContainers records container ids that belong to swarm tasks so the
-// event stream can ignore unrelated host containers.
-func (a *API) trackContainers(ids []string) {
-	a.mu.Lock()
-	for _, id := range ids {
-		if id != "" {
-			a.swarmContainers[id] = true
-		}
-	}
-	a.mu.Unlock()
-}
-
-func (a *API) isSwarmContainer(id string) bool {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.swarmContainers[id]
 }
 
 // ShortID truncates a swarm/docker id for display.

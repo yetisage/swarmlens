@@ -79,31 +79,39 @@ func TestLive(t *testing.T) {
 		t.Errorf("Contexts: %v", err)
 	}
 
-	// Describe and YAML for the first object of each kind.
-	check := func(kind Kind, id string) {
-		d, err := a.Describe(ctx, kind, id)
-		if err != nil || strings.TrimSpace(d) == "" {
-			t.Errorf("Describe(%s %s): %q %v", kind, id, d, err)
-		}
-		y, err := a.YAML(ctx, kind, id)
-		if err != nil || strings.TrimSpace(y) == "" {
-			t.Errorf("YAML(%s %s): %q %v", kind, id, y, err)
-		}
-		if kind == KindService {
-			t.Logf("--- describe %s\n%s", kind, d)
+	// Describe and YAML for every object of every kind (a bounded number of
+	// each: a big swarm should not make this test slow).
+	const perKind = 25
+	check := func(kind Kind, ids []string) {
+		for i, id := range ids {
+			if i == perKind {
+				break
+			}
+			d, err := a.Describe(ctx, kind, id)
+			if err != nil || strings.TrimSpace(d) == "" {
+				t.Errorf("Describe(%s %s): %q %v", kind, id, d, err)
+			}
+			y, err := a.YAML(ctx, kind, id)
+			if err != nil || strings.TrimSpace(y) == "" {
+				t.Errorf("YAML(%s %s): %q %v", kind, id, y, err)
+			}
 		}
 	}
+	vols, _ := a.Volumes(ctx)
+	secrets, _ := a.Secrets(ctx)
+	configs, _ := a.Configs(ctx)
+	stacks, _ := a.Stacks(ctx)
+	check(KindService, mapIDs(svcs, func(s Service) string { return s.ID }))
+	check(KindTask, mapIDs(tasks, func(s Task) string { return s.ID }))
+	check(KindNode, mapIDs(nodes, func(s Node) string { return s.ID }))
+	check(KindNetwork, mapIDs(nets, func(s Network) string { return s.ID }))
+	check(KindVolume, mapIDs(vols, func(s Volume) string { return s.Name }))
+	check(KindSecret, mapIDs(secrets, func(s Secret) string { return s.ID }))
+	check(KindConfig, mapIDs(configs, func(s Config) string { return s.ID }))
+	check(KindStack, mapIDs(stacks, func(s Stack) string { return s.Name }))
 	if len(svcs) > 0 {
-		check(KindService, svcs[0].ID)
-	}
-	if len(tasks) > 0 {
-		check(KindTask, tasks[0].ID)
-	}
-	if len(nodes) > 0 {
-		check(KindNode, nodes[0].ID)
-	}
-	if len(nets) > 0 {
-		check(KindNetwork, nets[0].ID)
+		d, _ := a.Describe(ctx, KindService, svcs[0].ID)
+		t.Logf("--- describe %s\n%s", KindService, d)
 	}
 
 	// A short, non-following read of the first service's logs.
@@ -122,4 +130,12 @@ func TestLive(t *testing.T) {
 			t.Logf("received %d log lines", n)
 		}
 	}
+}
+
+func mapIDs[T any](items []T, id func(T) string) []string {
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, id(it))
+	}
+	return out
 }

@@ -1,0 +1,116 @@
+{
+  "CreatedAt": "2026-11-09T16:11:41.894281152Z",
+  "Endpoint": {
+    "Ports": [
+      {
+        "Protocol": "tcp",
+        "PublishMode": "ingress",
+        "PublishedPort": 8080,
+        "TargetPort": 80
+      }
+    ],
+    "Spec": {
+      "Mode": "vip",
+      "Ports": [
+        {
+          "Protocol": "tcp",
+          "PublishMode": "ingress",
+          "PublishedPort": 8080,
+          "TargetPort": 80
+        }
+      ]
+    },
+    "VirtualIPs": [
+      {
+        "Addr": "10.0.0.3/24",
+        "NetworkID": "p46tweo17453z762gy8tqfm7r"
+      },
+      {
+        "Addr": "10.0.2.2/24",
+        "NetworkID": "nay8fitdso9ruzyspfi2t4c5a"
+      }
+    ]
+  },
+  "ID": "kzmfj1c2xci3hvm8bkm6ej8ty",
+  "Spec": {
+    "EndpointSpec": {
+      "Mode": "vip",
+      "Ports": [
+        {
+          "Protocol": "tcp",
+          "PublishMode": "ingress",
+          "PublishedPort": 8080,
+          "TargetPort": 80
+        }
+      ]
+    },
+    "Labels": {
+      "com.docker.stack.image": "hello:1",
+      "com.docker.stack.namespace": "shop"
+    },
+    "Mode": {
+      "Replicated": {
+        "Replicas": 2
+      }
+    },
+    "Name": "shop_api",
+    "TaskTemplate": {
+      "ContainerSpec": {
+        "Configs": [
+          {
+            "ConfigID": "ulca27up73bcm61rte609itl4",
+            "ConfigName": "shop_appcfg",
+            "File": {
+              "GID": "0",
+              "Mode": 292,
+              "Name": "appcfg",
+              "UID": "0"
+            }
+          }
+        ],
+        "Env": [
+          "ESC=pwn",
+          "TOKEN=abc123"
+        ],
+        "Image": "hello:1",
+        "Isolation": "default",
+        "Labels": {
+          "com.docker.stack.namespace": "shop"
+        },
+        "Privileges": {
+          "CredentialSpec": null,
+          "NoNewPrivileges": false,
+          "SELinuxContext": null
+        },
+        "Secrets": [
+          {
+            "File": {
+              "GID": "0",
+              "Mode": 292,
+              "Name": "dbpass",
+              "UID": "0"
+            },
+            "SecretID": "jn1j6wiwfrczyfbiwtfnsx7dp",
+            "SecretName": "shop_dbpass"
+          }
+        ]
+      },
+      "ForceUpdate": 0,
+      "Networks": [
+        {
+          "Aliases": [
+            "api"
+          ],
+          "Target": "nay8fitdso9ruzyspfi2t4c5a"
+        }
+      ],
+      "Placement": {},
+      "Resources": {},
+      "Runtime": "container"
+    }
+  },
+  "UpdatedAt": "2026-11-09T16:11:41.894980351Z",
+  "Version": {
+    "Index": 25
+  }
+}

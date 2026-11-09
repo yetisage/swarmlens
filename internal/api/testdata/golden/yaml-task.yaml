@@ -1,0 +1,108 @@
+CreatedAt: "2026-11-09T16:11:41.895669155Z"
+DesiredState: running
+ID: bumfnei4y7f9a52da4hsvdjfd
+Labels: {}
+NetworksAttachments:
+  - Addresses:
+      - 10.0.0.5/24
+    Network:
+      CreatedAt: "2026-11-09T16:11:39.522042585Z"
+      DriverState:
+        Name: overlay
+        Options:
+          com.docker.network.driver.overlay.vxlanid_list: "4096"
+      ID: p46tweo17453z762gy8tqfm7r
+      IPAMOptions:
+        Configs:
+          - Gateway: 10.0.0.1
+            Subnet: 10.0.0.0/24
+        Driver:
+          Name: default
+      Spec:
+        DriverConfiguration: {}
+        IPAMOptions:
+          Driver: {}
+        Ingress: true
+        Labels: {}
+        Name: ingress
+        Scope: swarm
+      UpdatedAt: "2026-11-09T16:11:39.523685445Z"
+      Version:
+        Index: 5
+  - Addresses:
+      - 10.0.2.4/24
+    Network:
+      CreatedAt: "2026-11-09T16:11:40.174782374Z"
+      DriverState:
+        Name: overlay
+        Options:
+          com.docker.network.driver.overlay.vxlanid_list: "4098"
+      ID: nay8fitdso9ruzyspfi2t4c5a
+      IPAMOptions:
+        Configs:
+          - Gateway: 10.0.2.1
+            Subnet: 10.0.2.0/24
+        Driver:
+          Name: default
+      Spec:
+        DriverConfiguration:
+          Name: overlay
+        Labels:
+          com.docker.stack.namespace: shop
+        Name: shop_back
+        Scope: swarm
+      UpdatedAt: "2026-11-09T16:11:40.175136405Z"
+      Version:
+        Index: 14
+NodeID: qs531opjwnjwvvp41wysh44rv
+ServiceID: kzmfj1c2xci3hvm8bkm6ej8ty
+Slot: 2
+Spec:
+  ContainerSpec:
+    Configs:
+      - ConfigID: ulca27up73bcm61rte609itl4
+        ConfigName: shop_appcfg
+        File:
+          GID: "0"
+          Mode: 292
+          Name: appcfg
+          UID: "0"
+    Env:
+      - ESC=pwn
+      - TOKEN=abc123
+    Image: hello:1
+    Isolation: default
+    Labels:
+      com.docker.stack.namespace: shop
+    Privileges:
+      CredentialSpec: null
+      NoNewPrivileges: false
+      SELinuxContext: null
+    Secrets:
+      - File:
+          GID: "0"
+          Mode: 292
+          Name: dbpass
+          UID: "0"
+        SecretID: jn1j6wiwfrczyfbiwtfnsx7dp
+        SecretName: shop_dbpass
+  ForceUpdate: 0
+  Networks:
+    - Aliases:
+        - api
+      Target: nay8fitdso9ruzyspfi2t4c5a
+  Placement: {}
+  Resources: {}
+Status:
+  ContainerStatus:
+    ContainerID: 70dc4123fc42480999cb7e5c9e960b885441650c64ec1a502b61ac304e934080
+    ExitCode: 0
+    PID: 6694
+  Message: started
+  PortStatus: {}
+  State: running
+  Timestamp: "2026-11-09T16:11:42.89300674Z"
+UpdatedAt: "2026-11-09T16:11:42.955897514Z"
+Version:
+  Index: 42
+Volumes: null
