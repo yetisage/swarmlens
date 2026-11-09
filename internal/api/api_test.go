@@ -649,7 +649,7 @@ func TestEventsReconnectDelayStartsOverAfterAHealthyStream(t *testing.T) {
 		ends = append(ends, time.Now())
 		mu.Unlock()
 	}))
-	a.reconnect = backoffPolicy{initial: 100 * time.Millisecond, max: 800 * time.Millisecond, healthy: time.Hour}
+	a.reconnect = backoffPolicy{initial: 150 * time.Millisecond, max: 2 * time.Second, healthy: time.Hour}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -669,9 +669,10 @@ func TestEventsReconnectDelayStartsOverAfterAHealthyStream(t *testing.T) {
 	if len(starts) < 4 {
 		t.Fatalf("only %d connection attempts", len(starts))
 	}
-	// without the reset the delay after attempt 3 is 400ms (100, 200, 400)
-	if gap := starts[3].Sub(ends[2]); gap > 300*time.Millisecond {
-		t.Errorf("reconnected after %v, want about 100ms: the delay must start over after a stream that worked", gap.Round(time.Millisecond))
+	// without the reset the delay after attempt 3 is 600ms (150, 300, 600);
+	// with it, 150ms. The margins are wide on both sides for a busy machine.
+	if gap := starts[3].Sub(ends[2]); gap > 400*time.Millisecond {
+		t.Errorf("reconnected after %v, want about 150ms: the delay must start over after a stream that worked", gap.Round(time.Millisecond))
 	}
 }
 
