@@ -61,7 +61,7 @@ func (v *textView) handle(msg tea.Msg) tea.Cmd {
 	v.loading = false
 	if m.err != nil {
 		v.a.flash(flashErr, m.err.Error())
-		return v.a.pop() // nothing to show: the object is probably gone
+		return v.a.remove(v) // nothing to show: the object is probably gone
 	}
 	v.lines = strings.Split(strings.TrimRight(m.text, "\n"), "\n")
 	v.research()

@@ -78,7 +78,8 @@ type app struct {
 	scope       string   // active stack; "" means all
 	recent      []string // stacks used, most recent first
 
-	events       []api.Event
+	events       []seenEvent
+	eventSeq     int
 	eventPending bool
 
 	hist    []string
@@ -193,13 +194,15 @@ type (
 		text string
 		err  error
 	}
+	// gen says which run of the log stream a message belongs to, so lines
+	// still in flight from a stream that was restarted are dropped.
 	logMsg struct {
-		vid   int
-		lines []api.LogLine
+		vid, gen int
+		lines    []api.LogLine
 	}
 	logEndMsg struct {
-		vid int
-		err error
+		vid, gen int
+		err      error
 	}
 )
 
@@ -383,6 +386,22 @@ func (a *app) pop() tea.Cmd {
 }
 
 // setRoot replaces the whole stack, which is what ":" commands do.
+// remove takes a view off the stack wherever it is: the one on top goes
+// through pop so that the view below is refreshed.
+func (a *app) remove(v view) tea.Cmd {
+	if a.top() == v {
+		return a.pop()
+	}
+	for i, s := range a.stack {
+		if s == v {
+			s.stop()
+			a.stack = append(a.stack[:i], a.stack[i+1:]...)
+			break
+		}
+	}
+	return nil
+}
+
 func (a *app) setRoot(v view) tea.Cmd {
 	for _, old := range a.stack {
 		old.stop()
@@ -432,9 +451,11 @@ func (a *app) onKey(msg tea.KeyMsg) tea.Cmd {
 	if msg.String() == "ctrl+c" {
 		return a.quit() // even over a dialog or the prompt
 	}
-	if a.modal != nil {
-		cmd, done := a.modal.key(msg)
-		if done {
+	if m := a.modal; m != nil {
+		cmd, done := m.key(msg)
+		// A button may open the next dialog (a confirmation after a form,
+		// say): only the dialog that handled the key is closed.
+		if done && a.modal == m {
 			a.modal = nil
 		}
 		return cmd
@@ -574,7 +595,8 @@ func (a *app) onEvent(e api.Event) tea.Cmd {
 		a.flash(flashWarn, "event stream: "+e.Attrs["message"])
 		return nil
 	}
-	a.events = append(a.events, e)
+	a.eventSeq++
+	a.events = append(a.events, seenEvent{n: a.eventSeq, Event: e})
 	if len(a.events) > maxEvents {
 		a.events = a.events[len(a.events)-maxEvents:]
 	}
@@ -586,8 +608,16 @@ func (a *app) onEvent(e api.Event) tea.Cmd {
 }
 
 // eventsSnapshot copies the event buffer for the events view.
-func (a *app) eventsSnapshot() []api.Event {
-	return append([]api.Event(nil), a.events...)
+func (a *app) eventsSnapshot() []seenEvent {
+	return append([]seenEvent(nil), a.events...)
+}
+
+// seenEvent is an event with the number it arrived under. That number, not
+// its position (which moves as old events roll off) or its time (events
+// share one), identifies its row in the events view.
+type seenEvent struct {
+	n int
+	api.Event
 }
 
 // notInSwarm explains why nothing will load.

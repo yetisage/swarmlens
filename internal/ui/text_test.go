@@ -326,3 +326,22 @@ func FuzzANSIRender(f *testing.F) {
 	f.Add("\x1b[31mred\x1b[0m plain 日本語 \x1b[1;4mbold")
 	f.Fuzz(func(t *testing.T, in string) { onlyStyling(t, in, renderLine(in)) })
 }
+
+func TestExpandIsSinglePass(t *testing.T) {
+	vars := map[string]string{"NAME": "svc", "COL-ERROR": "boom $NAME ${NAME}", "ID": "abc"}
+	for in, want := range map[string]string{
+		"$COL-ERROR":   "boom $NAME ${NAME}", // a value is inserted as it is
+		"$ID-$ID":      "abc-abc",
+		"${ID}x":       "abcx",
+		"$IDx":         "abcx", // the longest name that fits wins
+		"$UNKNOWN $":   "$UNKNOWN $",
+		"${NAME":       "${NAME",
+		"cost: $5":     "cost: $5",
+		"$$NAME":       "$svc",
+		"${NAME}${ID}": "svcabc",
+	} {
+		if got := expand(in, vars); got != want {
+			t.Errorf("expand(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

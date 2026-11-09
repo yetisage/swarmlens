@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -177,7 +178,7 @@ func serviceActions(v *tableView) []action {
 			}
 			return v.a.scaleService(s)
 		}),
-		mut("r", "Restart", func() tea.Cmd { return v.a.bulk(v, "Restart", "Restarted", restartOne) }),
+		mut("r", "Restart", func() tea.Cmd { return v.a.bulk(v, "Restart", "Restarted", "", restartOne) }),
 		mut("b", "Rollback", func() tea.Cmd {
 			s, ok := svc()
 			switch {
@@ -440,11 +441,9 @@ func nodeActions(v *tableView) []action {
 		}
 		return api.Node{}, false
 	}
-	avail := func(a api.NodeAvailability, verb, past string) func() tea.Cmd {
-		return func() tea.Cmd {
-			return v.a.bulk(v, verb, past, func(ctx context.Context, be api.Backend, r *row) error {
-				return be.SetNodeAvailability(ctx, r.id, a)
-			})
+	setAvail := func(a api.NodeAvailability) func(ctx context.Context, be api.Backend, r *row) error {
+		return func(ctx context.Context, be api.Backend, r *row) error {
+			return be.SetNodeAvailability(ctx, r.id, a)
 		}
 	}
 	role := func(rl api.NodeRole) func() tea.Cmd {
@@ -477,18 +476,22 @@ func nodeActions(v *tableView) []action {
 		}),
 		describeAct(v, api.KindNode),
 		yamlAct(v, api.KindNode),
-		mut("c", "Cordon", avail(api.AvailPause, "Cordon", "Cordoned")),
-		mut("u", "Uncordon", avail(api.AvailActive, "Uncordon", "Uncordoned")),
+		mut("c", "Cordon", func() tea.Cmd {
+			return v.a.bulk(v, "Cordon", "Cordoned", "", setAvail(api.AvailPause))
+		}),
+		mut("u", "Uncordon", func() tea.Cmd {
+			return v.a.bulk(v, "Uncordon", "Uncordoned", "", setAvail(api.AvailActive))
+		}),
 		mut("r", "Drain", func() tea.Cmd {
-			n, ok := node()
-			if !ok {
+			targets := v.targets()
+			if len(targets) == 0 {
 				return nil
 			}
-			msg := fmt.Sprintf("Drain node %q? Its tasks are rescheduled on other nodes.", n.Hostname)
-			if len(v.marks) > 0 {
-				msg = fmt.Sprintf("Drain %d nodes? Their tasks are rescheduled on other nodes.", len(v.marks))
+			ask := fmt.Sprintf("Drain node %q? Its tasks are rescheduled on other nodes.", targets[0].name)
+			if len(targets) > 1 {
+				ask = fmt.Sprintf("Drain %d nodes? Their tasks are rescheduled on other nodes.", len(targets))
 			}
-			return v.a.confirm("Drain", msg, avail(api.AvailDrain, "Drain", "Drained"))
+			return v.a.bulk(v, "Drain", "Drained", ask, setAvail(api.AvailDrain))
 		}),
 		mut("p", "Promote", role(api.RoleManager)),
 		mut("D", "Demote", role(api.RoleWorker)),
@@ -842,8 +845,9 @@ func init() {
 	eventRes.load = func(ctx context.Context, be api.Backend, q loadQuery) ([]*row, error) {
 		now := q.clock()
 		rows := make([]*row, 0, len(q.events))
-		for i, e := range q.events {
-			r := newRow(eventRes, fmt.Sprintf("%d/%d", e.Time.UnixNano(), i), e.Name)
+		for _, se := range q.events {
+			e := se.Event
+			r := newRow(eventRes, strconv.Itoa(se.n), e.Name)
 			r.stack, r.obj = e.Stack, e
 			r.cells[evSeen], r.nums[evSeen] = ageCell(e.Time, now)
 			r.cells[evType] = e.Type

@@ -66,7 +66,7 @@ type loadQuery struct {
 	scope     string // active stack ("" = all)
 	serviceID string // drill-down: tasks of a service
 	nodeID    string // drill-down: tasks on a node
-	events    []api.Event
+	events    []seenEvent
 	now       time.Time // the clock ages are measured against
 }
 
