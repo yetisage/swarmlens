@@ -25,7 +25,7 @@ jobs:
       - uses: actions/checkout@v4
       # the newest Go, so that what is reported is in the dependencies and not
       # in a standard library that has been fixed since
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
           check-latest: true
