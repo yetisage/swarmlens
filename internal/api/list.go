@@ -8,10 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/swarm"
-	"github.com/docker/docker/api/types/volume"
+	"github.com/moby/moby/api/types/swarm"
+	"github.com/moby/moby/client"
 )
 
 // imageDisplay strips the immutable digest for display ("img@sha256:…" → "img").
@@ -107,12 +105,12 @@ func toService(s swarm.Service) Service {
 
 // Services implements Backend.
 func (a *API) Services(ctx context.Context) ([]Service, error) {
-	svcs, err := a.cli.ServiceList(ctx, swarm.ServiceListOptions{Status: true})
+	res, err := a.cli.ServiceList(ctx, client.ServiceListOptions{Status: true})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Service, 0, len(svcs))
-	for _, s := range svcs {
+	out := make([]Service, 0, len(res.Items))
+	for _, s := range res.Items {
 		out = append(out, toService(s))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
@@ -123,21 +121,23 @@ func (a *API) Services(ctx context.Context) ([]Service, error) {
 // longer returns a task name: <service>.<slot>, or <service>.<node> for
 // global services.
 func (a *API) Tasks(ctx context.Context, q TaskQuery) ([]Task, error) {
-	f := filters.NewArgs()
+	f := client.Filters{}
 	if q.ServiceID != "" {
 		f.Add("service", q.ServiceID)
 	}
 	if q.NodeID != "" {
 		f.Add("node", q.NodeID)
 	}
-	tasks, err := a.cli.TaskList(ctx, swarm.TaskListOptions{Filters: f})
+	taskList, err := a.cli.TaskList(ctx, client.TaskListOptions{Filters: f})
 	if err != nil {
 		return nil, err
 	}
-	svcs, err := a.cli.ServiceList(ctx, swarm.ServiceListOptions{})
+	tasks := taskList.Items
+	svcList, err := a.cli.ServiceList(ctx, client.ServiceListOptions{})
 	if err != nil {
 		return nil, err
 	}
+	svcs := svcList.Items
 	type svcInfo struct {
 		name, stack string
 		global      bool
@@ -197,10 +197,11 @@ func (a *API) Tasks(ctx context.Context, q TaskQuery) ([]Task, error) {
 
 // Nodes implements Backend.
 func (a *API) Nodes(ctx context.Context) ([]Node, error) {
-	nodes, err := a.cli.NodeList(ctx, swarm.NodeListOptions{})
+	nodeList, err := a.cli.NodeList(ctx, client.NodeListOptions{})
 	if err != nil {
 		return nil, err
 	}
+	nodes := nodeList.Items
 	names := make(map[string]string, len(nodes))
 	for _, n := range nodes {
 		names[n.ID] = n.Description.Hostname
@@ -215,8 +216,8 @@ func (a *API) Nodes(ctx context.Context) ([]Node, error) {
 		mem   int64
 	}
 	loads := map[string]*load{}
-	if tasks, err := a.cli.TaskList(ctx, swarm.TaskListOptions{Filters: filters.NewArgs(filters.Arg("desired-state", "running"))}); err == nil {
-		for _, t := range tasks {
+	if running, err := a.cli.TaskList(ctx, client.TaskListOptions{Filters: make(client.Filters).Add("desired-state", "running")}); err == nil {
+		for _, t := range running.Items {
 			l := loads[t.NodeID]
 			if l == nil {
 				l = &load{}
@@ -276,12 +277,12 @@ func mergeLabels(maps ...map[string]string) map[string]string {
 
 // Networks implements Backend.
 func (a *API) Networks(ctx context.Context) ([]Network, error) {
-	nets, err := a.cli.NetworkList(ctx, network.ListOptions{})
+	res, err := a.cli.NetworkList(ctx, client.NetworkListOptions{})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Network, 0, len(nets))
-	for _, n := range nets {
+	out := make([]Network, 0, len(res.Items))
+	for _, n := range res.Items {
 		r := Network{
 			ID:         n.ID,
 			Name:       n.Name,
@@ -296,8 +297,8 @@ func (a *API) Networks(ctx context.Context) ([]Network, error) {
 			Created:    n.Created,
 		}
 		for _, c := range n.IPAM.Config {
-			if c.Subnet != "" {
-				r.Subnets = append(r.Subnets, c.Subnet)
+			if s := addrText(c.Subnet); s != "" {
+				r.Subnets = append(r.Subnets, s)
 			}
 		}
 		out = append(out, r)
@@ -308,12 +309,12 @@ func (a *API) Networks(ctx context.Context) ([]Network, error) {
 
 // Volumes implements Backend.
 func (a *API) Volumes(ctx context.Context) ([]Volume, error) {
-	res, err := a.cli.VolumeList(ctx, volume.ListOptions{})
+	res, err := a.cli.VolumeList(ctx, client.VolumeListOptions{})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Volume, 0, len(res.Volumes))
-	for _, v := range res.Volumes {
+	out := make([]Volume, 0, len(res.Items))
+	for _, v := range res.Items {
 		r := Volume{
 			Name:       v.Name,
 			Stack:      v.Labels[StackLabel],
@@ -333,12 +334,12 @@ func (a *API) Volumes(ctx context.Context) ([]Volume, error) {
 
 // Secrets implements Backend. Secret values are never fetched.
 func (a *API) Secrets(ctx context.Context) ([]Secret, error) {
-	secrets, err := a.cli.SecretList(ctx, swarm.SecretListOptions{})
+	res, err := a.cli.SecretList(ctx, client.SecretListOptions{})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Secret, 0, len(secrets))
-	for _, s := range secrets {
+	out := make([]Secret, 0, len(res.Items))
+	for _, s := range res.Items {
 		r := Secret{
 			ID:      s.ID,
 			Name:    s.Spec.Name,
@@ -358,12 +359,12 @@ func (a *API) Secrets(ctx context.Context) ([]Secret, error) {
 
 // Configs implements Backend.
 func (a *API) Configs(ctx context.Context) ([]Config, error) {
-	configs, err := a.cli.ConfigList(ctx, swarm.ConfigListOptions{})
+	res, err := a.cli.ConfigList(ctx, client.ConfigListOptions{})
 	if err != nil {
 		return nil, err
 	}
-	out := make([]Config, 0, len(configs))
-	for _, c := range configs {
+	out := make([]Config, 0, len(res.Items))
+	for _, c := range res.Items {
 		out = append(out, Config{
 			ID:      c.ID,
 			Name:    c.Spec.Name,

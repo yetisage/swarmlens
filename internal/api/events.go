@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	ev "github.com/docker/docker/api/types/events"
-	"github.com/docker/docker/api/types/filters"
+	ev "github.com/moby/moby/api/types/events"
+	"github.com/moby/moby/client"
 )
 
 // taskIDLabel is put by swarmkit on every container that runs a task, so it
@@ -76,17 +76,10 @@ func (a *API) Events(ctx context.Context, emit func(Event)) error {
 // streamOnce runs one connection to the event stream and says how many
 // messages it carried.
 func (a *API) streamOnce(ctx context.Context, emit func(Event)) (received int, err error) {
-	msgs, errs := a.cli.Events(ctx, ev.ListOptions{
-		Filters: filters.NewArgs(
-			filters.Arg("type", "service"),
-			filters.Arg("type", "node"),
-			filters.Arg("type", "container"),
-			filters.Arg("type", "network"),
-			filters.Arg("type", "volume"),
-			filters.Arg("type", "secret"),
-			filters.Arg("type", "config"),
-		),
+	stream := a.cli.Events(ctx, client.EventsListOptions{
+		Filters: make(client.Filters).Add("type", "service", "node", "container", "network", "volume", "secret", "config"),
 	})
+	msgs, errs := stream.Messages, stream.Err
 	for {
 		select {
 		case <-ctx.Done():

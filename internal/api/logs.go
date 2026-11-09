@@ -16,7 +16,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/docker/docker/api/types/container"
+	"github.com/moby/moby/client"
 )
 
 // Logs implements Backend. For a service it aggregates the logs of all its
@@ -24,7 +24,7 @@ import (
 // the task that wrote it. Lines are delivered in batches so a busy service
 // does not flood the UI.
 func (a *API) Logs(ctx context.Context, t LogTarget, o LogOptions, emit func([]LogLine)) error {
-	opts := container.LogsOptions{
+	opts := client.ServiceLogsOptions{
 		ShowStdout: true,
 		ShowStderr: true,
 		Timestamps: true,
@@ -47,7 +47,9 @@ func (a *API) Logs(ctx context.Context, t LogTarget, o LogOptions, emit func([]L
 	case KindService:
 		rc, err = a.cli.ServiceLogs(ctx, t.ID, opts)
 	case KindTask:
-		rc, err = a.cli.TaskLogs(ctx, t.ID, opts)
+		// The two option types have the same fields; if the client ever tells
+		// them apart this conversion stops compiling.
+		rc, err = a.cli.TaskLogs(ctx, t.ID, client.TaskLogsOptions(opts))
 	default:
 		return fmt.Errorf("no logs for a %s", t.Kind)
 	}

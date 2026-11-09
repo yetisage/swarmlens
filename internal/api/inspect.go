@@ -10,9 +10,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"github.com/docker/docker/api/types/filters"
-	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/api/types/swarm"
+	"github.com/moby/moby/api/types/swarm"
+	"github.com/moby/moby/client"
 	"gopkg.in/yaml.v3"
 )
 
@@ -141,13 +140,14 @@ func (a *API) Describe(ctx context.Context, kind Kind, id string) (string, error
 }
 
 func (a *API) describeService(ctx context.Context, id string) (string, error) {
-	svc, _, err := a.cli.ServiceInspectWithRaw(ctx, id, swarm.ServiceInspectOptions{})
+	res, err := a.cli.ServiceInspect(ctx, id, client.ServiceInspectOptions{})
 	if err != nil {
 		return "", err
 	}
-	listed, _ := a.cli.ServiceList(ctx, swarm.ServiceListOptions{Filters: filters.NewArgs(filters.Arg("id", svc.ID)), Status: true})
-	if len(listed) == 1 {
-		svc.ServiceStatus = listed[0].ServiceStatus
+	svc := res.Service
+	listed, _ := a.cli.ServiceList(ctx, client.ServiceListOptions{Filters: make(client.Filters).Add("id", svc.ID), Status: true})
+	if len(listed.Items) == 1 {
+		svc.ServiceStatus = listed.Items[0].ServiceStatus
 	}
 	s := toService(svc)
 
@@ -313,10 +313,22 @@ func (a *API) describeService(ctx context.Context, id string) (string, error) {
 func writeUpdateConfig(d *doc, u *swarm.UpdateConfig) {
 	d.kv(2, "Parallelism", fmt.Sprint(u.Parallelism))
 	d.kv(2, "Delay", u.Delay.String())
-	d.kv(2, "Failure Action", u.FailureAction)
+	d.kv(2, "Failure Action", string(u.FailureAction))
 	d.kv(2, "Monitor", u.Monitor.String())
 	d.kv(2, "Max Failure Ratio", fmt.Sprint(u.MaxFailureRatio))
-	d.kv(2, "Order", u.Order)
+	d.kv(2, "Order", string(u.Order))
+}
+
+// addrText renders an address or prefix the engine sent. The zero value is the
+// engine's empty string and stays empty; netip would print it as "invalid IP".
+func addrText[T interface {
+	IsValid() bool
+	String() string
+}](a T) string {
+	if !a.IsValid() {
+		return ""
+	}
+	return a.String()
 }
 
 func orNone(ss []string) []string {
@@ -330,8 +342,8 @@ func orNone(ss []string) []string {
 // the caller falls back to ids.
 func (a *API) networkNames(ctx context.Context) map[string]string {
 	out := map[string]string{}
-	if nets, err := a.cli.NetworkList(ctx, network.ListOptions{}); err == nil {
-		for _, n := range nets {
+	if nets, err := a.cli.NetworkList(ctx, client.NetworkListOptions{}); err == nil {
+		for _, n := range nets.Items {
 			out[n.ID] = n.Name
 		}
 	}
@@ -339,10 +351,11 @@ func (a *API) networkNames(ctx context.Context) map[string]string {
 }
 
 func (a *API) describeTask(ctx context.Context, id string) (string, error) {
-	t, _, err := a.cli.TaskInspectWithRaw(ctx, id)
+	res, err := a.cli.TaskInspect(ctx, id, client.TaskInspectOptions{})
 	if err != nil {
 		return "", err
 	}
+	t := res.Task
 	tasks, _ := a.Tasks(ctx, TaskQuery{ServiceID: t.ServiceID})
 	var row Task
 	for _, r := range tasks {
@@ -373,7 +386,11 @@ func (a *API) describeTask(ctx context.Context, id string) (string, error) {
 	}
 	var nets []string
 	for _, n := range t.NetworksAttachments {
-		nets = append(nets, n.Network.Spec.Name+" "+strings.Join(n.Addresses, ", "))
+		addrs := make([]string, 0, len(n.Addresses))
+		for _, a := range n.Addresses {
+			addrs = append(addrs, addrText(a))
+		}
+		nets = append(nets, n.Network.Spec.Name+" "+strings.Join(addrs, ", "))
 	}
 	d.kv(0, "Networks", nets...)
 	d.kv(0, "Created", stamp(t.CreatedAt))
@@ -382,10 +399,11 @@ func (a *API) describeTask(ctx context.Context, id string) (string, error) {
 }
 
 func (a *API) describeNode(ctx context.Context, id string) (string, error) {
-	n, _, err := a.cli.NodeInspectWithRaw(ctx, id)
+	res, err := a.cli.NodeInspect(ctx, id, client.NodeInspectOptions{})
 	if err != nil {
 		return "", err
 	}
+	n := res.Node
 	var d doc
 	d.kv(0, "Hostname", n.Description.Hostname)
 	d.kv(0, "ID", n.ID)
@@ -435,10 +453,11 @@ func (a *API) describeNode(ctx context.Context, id string) (string, error) {
 }
 
 func (a *API) describeNetwork(ctx context.Context, id string) (string, error) {
-	n, err := a.cli.NetworkInspect(ctx, id, network.InspectOptions{})
+	res, err := a.cli.NetworkInspect(ctx, id, client.NetworkInspectOptions{})
 	if err != nil {
 		return "", err
 	}
+	n := res.Network
 	var d doc
 	d.kv(0, "Name", n.Name)
 	d.kv(0, "ID", n.ID)
@@ -450,7 +469,7 @@ func (a *API) describeNetwork(ctx context.Context, id string) (string, error) {
 	d.kv(0, "Ingress", boolText(n.Ingress))
 	d.kv(0, "IPv6", boolText(n.EnableIPv6))
 	for _, c := range n.IPAM.Config {
-		d.kv(0, "Subnet", strings.TrimSpace(c.Subnet+"  gateway "+c.Gateway))
+		d.kv(0, "Subnet", strings.TrimSpace(addrText(c.Subnet)+"  gateway "+addrText(c.Gateway)))
 	}
 	d.kv(0, "Options", sortedPairs(n.Options)...)
 	d.kv(0, "Labels", orNone(sortedPairs(n.Labels))...)
@@ -459,7 +478,7 @@ func (a *API) describeNetwork(ctx context.Context, id string) (string, error) {
 		d.head(0, "Containers")
 		var rows []string
 		for _, c := range n.Containers {
-			rows = append(rows, fmt.Sprintf("  %-40s %s", c.Name, c.IPv4Address))
+			rows = append(rows, fmt.Sprintf("  %-40s %s", c.Name, addrText(c.IPv4Address)))
 		}
 		sort.Strings(rows)
 		d.line(strings.Join(rows, "\n") + "\n")
@@ -468,10 +487,11 @@ func (a *API) describeNetwork(ctx context.Context, id string) (string, error) {
 }
 
 func (a *API) describeVolume(ctx context.Context, id string) (string, error) {
-	v, err := a.cli.VolumeInspect(ctx, id)
+	res, err := a.cli.VolumeInspect(ctx, id, client.VolumeInspectOptions{})
 	if err != nil {
 		return "", err
 	}
+	v := res.Volume
 	var d doc
 	d.kv(0, "Name", v.Name)
 	d.kv(0, "Stack", v.Labels[StackLabel])
@@ -487,10 +507,11 @@ func (a *API) describeVolume(ctx context.Context, id string) (string, error) {
 }
 
 func (a *API) describeSecret(ctx context.Context, id string) (string, error) {
-	s, _, err := a.cli.SecretInspectWithRaw(ctx, id)
+	res, err := a.cli.SecretInspect(ctx, id, client.SecretInspectOptions{})
 	if err != nil {
 		return "", err
 	}
+	s := res.Secret
 	var d doc
 	d.kv(0, "Name", s.Spec.Name)
 	d.kv(0, "ID", s.ID)
@@ -509,10 +530,11 @@ func (a *API) describeSecret(ctx context.Context, id string) (string, error) {
 }
 
 func (a *API) describeConfig(ctx context.Context, id string) (string, error) {
-	c, _, err := a.cli.ConfigInspectWithRaw(ctx, id)
+	res, err := a.cli.ConfigInspect(ctx, id, client.ConfigInspectOptions{})
 	if err != nil {
 		return "", err
 	}
+	c := res.Config
 	var d doc
 	d.kv(0, "Name", c.Spec.Name)
 	d.kv(0, "ID", c.ID)
@@ -538,12 +560,12 @@ func (a *API) describeConfig(ctx context.Context, id string) (string, error) {
 // usedBy lists the services referencing a secret or config, so the user
 // can see why deleting it would be refused.
 func (a *API) usedBy(ctx context.Context, kind Kind, name string) []string {
-	svcs, err := a.cli.ServiceList(ctx, swarm.ServiceListOptions{})
+	res, err := a.cli.ServiceList(ctx, client.ServiceListOptions{})
 	if err != nil {
 		return nil
 	}
 	var out []string
-	for _, s := range svcs {
+	for _, s := range res.Items {
 		cs := s.Spec.TaskTemplate.ContainerSpec
 		if cs == nil {
 			continue
@@ -624,19 +646,26 @@ func (a *API) YAML(ctx context.Context, kind Kind, id string) (string, error) {
 	var err error
 	switch kind {
 	case KindService:
-		_, raw, err = a.cli.ServiceInspectWithRaw(ctx, id, swarm.ServiceInspectOptions{})
+		r, e := a.cli.ServiceInspect(ctx, id, client.ServiceInspectOptions{})
+		raw, err = r.Raw, e
 	case KindTask:
-		_, raw, err = a.cli.TaskInspectWithRaw(ctx, id)
+		r, e := a.cli.TaskInspect(ctx, id, client.TaskInspectOptions{})
+		raw, err = r.Raw, e
 	case KindNode:
-		_, raw, err = a.cli.NodeInspectWithRaw(ctx, id)
+		r, e := a.cli.NodeInspect(ctx, id, client.NodeInspectOptions{})
+		raw, err = r.Raw, e
 	case KindNetwork:
-		_, raw, err = a.cli.NetworkInspectWithRaw(ctx, id, network.InspectOptions{})
+		r, e := a.cli.NetworkInspect(ctx, id, client.NetworkInspectOptions{})
+		raw, err = r.Raw, e
 	case KindVolume:
-		_, raw, err = a.cli.VolumeInspectWithRaw(ctx, id)
+		r, e := a.cli.VolumeInspect(ctx, id, client.VolumeInspectOptions{})
+		raw, err = r.Raw, e
 	case KindSecret:
-		_, raw, err = a.cli.SecretInspectWithRaw(ctx, id)
+		r, e := a.cli.SecretInspect(ctx, id, client.SecretInspectOptions{})
+		raw, err = r.Raw, e
 	case KindConfig:
-		_, raw, err = a.cli.ConfigInspectWithRaw(ctx, id)
+		r, e := a.cli.ConfigInspect(ctx, id, client.ConfigInspectOptions{})
+		raw, err = r.Raw, e
 		if err == nil {
 			return configYAML(raw)
 		}

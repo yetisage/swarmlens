@@ -19,8 +19,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/docker/docker/api/types/swarm"
-	"github.com/docker/docker/client"
+	"github.com/moby/moby/api/types/swarm"
+	"github.com/moby/moby/client"
 )
 
 // API is the Docker Engine implementation of Backend.
@@ -157,8 +157,10 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
+// newClient builds the Engine API client. It negotiates the API version with
+// the daemon on its first request, which is the default of this client.
 func newClient(ep endpoint) (*client.Client, error) {
-	opts := []client.Opt{client.WithAPIVersionNegotiation()}
+	var opts []client.Opt
 
 	switch {
 	case strings.HasPrefix(ep.host, "ssh://"):
@@ -186,7 +188,7 @@ func newClient(ep endpoint) (*client.Client, error) {
 		}
 		opts = append(opts, client.WithHost(host))
 	}
-	return client.NewClientWithOpts(opts...)
+	return client.New(opts...)
 }
 
 func tlsConfig(ep endpoint) (*tls.Config, error) {
@@ -224,10 +226,11 @@ func (a *API) Endpoint() string { return a.endpoint }
 
 // Summary implements Backend.
 func (a *API) Summary(ctx context.Context) (*Summary, error) {
-	info, err := a.cli.Info(ctx)
+	res, err := a.cli.Info(ctx, client.InfoOptions{})
 	if err != nil {
 		return nil, err
 	}
+	info := res.Info
 	s := &Summary{
 		Context:       a.ctxName,
 		Endpoint:      a.endpoint,
@@ -238,7 +241,7 @@ func (a *API) Summary(ctx context.Context) (*Summary, error) {
 		Nodes:         info.Swarm.Nodes,
 		Managers:      info.Swarm.Managers,
 	}
-	if v, err := a.cli.ServerVersion(ctx); err == nil {
+	if v, err := a.cli.ServerVersion(ctx, client.ServerVersionOptions{}); err == nil {
 		s.APIVersion = v.APIVersion
 	}
 	if info.Swarm.LocalNodeState != swarm.LocalNodeStateActive {
@@ -257,9 +260,9 @@ func (a *API) Summary(ctx context.Context) (*Summary, error) {
 
 	// Cluster-wide health numbers for the header. Failures here are not
 	// fatal: the header just shows what it has.
-	if nodes, err := a.cli.NodeList(ctx, swarm.NodeListOptions{}); err == nil {
-		s.Nodes, s.Managers = len(nodes), 0
-		for _, n := range nodes {
+	if nodes, err := a.cli.NodeList(ctx, client.NodeListOptions{}); err == nil {
+		s.Nodes, s.Managers = len(nodes.Items), 0
+		for _, n := range nodes.Items {
 			if n.Status.State == swarm.NodeStateReady {
 				s.NodesReady++
 			}
@@ -274,10 +277,10 @@ func (a *API) Summary(ctx context.Context) (*Summary, error) {
 			}
 		}
 	}
-	if svcs, err := a.cli.ServiceList(ctx, swarm.ServiceListOptions{Status: true}); err == nil {
-		s.Services = len(svcs)
+	if svcs, err := a.cli.ServiceList(ctx, client.ServiceListOptions{Status: true}); err == nil {
+		s.Services = len(svcs.Items)
 		stacks := map[string]bool{}
-		for _, raw := range svcs {
+		for _, raw := range svcs.Items {
 			sv := toService(raw)
 			if sv.Stack != "" {
 				stacks[sv.Stack] = true
@@ -322,15 +325,15 @@ func (a *API) nodeNameMap(ctx context.Context, maxAge time.Duration) map[string]
 	}
 	a.mu.RUnlock()
 
-	nodes, err := a.cli.NodeList(ctx, swarm.NodeListOptions{})
+	res, err := a.cli.NodeList(ctx, client.NodeListOptions{})
 	if err != nil {
 		// A stale cache beats failing the whole call.
 		a.mu.RLock()
 		defer a.mu.RUnlock()
 		return copyMap(a.nodeNames)
 	}
-	m := make(map[string]string, len(nodes))
-	for _, n := range nodes {
+	m := make(map[string]string, len(res.Items))
+	for _, n := range res.Items {
 		m[n.ID] = n.Description.Hostname
 	}
 	a.setNodeNames(m)

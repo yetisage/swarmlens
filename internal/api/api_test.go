@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
-	ev "github.com/docker/docker/api/types/events"
-	"github.com/docker/docker/api/types/swarm"
-	"github.com/docker/docker/client"
+	ev "github.com/moby/moby/api/types/events"
+	"github.com/moby/moby/api/types/swarm"
+	"github.com/moby/moby/client"
 )
 
 func toEventMessage(typ, id string) ev.Message {
@@ -26,9 +26,9 @@ func newTestAPI(t *testing.T, h http.Handler) *API {
 	srv := httptest.NewServer(h)
 	t.Cleanup(srv.Close)
 
-	cli, err := client.NewClientWithOpts(
+	cli, err := client.New(
 		client.WithHost("tcp://"+srv.Listener.Addr().String()),
-		client.WithVersion("1.51"),
+		client.WithAPIVersion("1.51"),
 	)
 	if err != nil {
 		t.Fatalf("client: %v", err)
