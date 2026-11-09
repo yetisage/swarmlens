@@ -151,13 +151,13 @@ func newClient(ep endpoint) (*client.Client, error) {
 
 	switch {
 	case strings.HasPrefix(ep.host, "ssh://"):
-		dial, err := sshDialer(ep.host)
+		spec, err := parseSSHURL(ep.host)
 		if err != nil {
 			return nil, err
 		}
 		// Same trick as the docker CLI's connection helper: the host is a
 		// placeholder, the dialer does the real work.
-		opts = append(opts, client.WithHost("http://docker.example.com"), client.WithDialContext(dial))
+		opts = append(opts, client.WithHost("http://docker.example.com"), client.WithDialContext(sshDialer(spec)))
 
 	case ep.caFile != "" || ep.certFile != "" || ep.skipTLSVerify:
 		cfg, err := tlsConfig(ep)
