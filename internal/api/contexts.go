@@ -8,8 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-
-	"github.com/docker/docker/client"
 )
 
 // The docker CLI keeps contexts on disk:
@@ -102,12 +100,9 @@ func (a *API) Contexts() ([]ContextInfo, error) {
 	out := []ContextInfo{{
 		Name:        "default",
 		Description: "Current DOCKER_HOST based configuration",
-		Endpoint:    client.DefaultDockerHost,
+		Endpoint:    defaultEndpoint().display(),
 		Current:     cur == "default",
 	}}
-	if h := os.Getenv("DOCKER_HOST"); h != "" {
-		out[0].Endpoint = h
-	}
 
 	entries, err := os.ReadDir(filepath.Join(dockerConfigDir(), "contexts", "meta"))
 	if err != nil {

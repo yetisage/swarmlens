@@ -4,6 +4,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/docker/docker/client"
 )
 
 // writeContext lays a docker context out on disk the way the CLI does.
@@ -89,5 +91,39 @@ func TestListContextsWithoutStore(t *testing.T) {
 	list, err := a.Contexts()
 	if err != nil || len(list) != 1 || !list[0].Current {
 		t.Fatalf("list=%+v err=%v", list, err)
+	}
+}
+
+// "default" is the context made of DOCKER_HOST: asking for it by name must
+// land where plain resolution lands, and the contexts table must show where
+// that is. It used to ignore DOCKER_HOST and connect to the local socket
+// while listing DOCKER_HOST as its endpoint.
+func TestDefaultContextHonoursDockerHost(t *testing.T) {
+	t.Setenv("DOCKER_CONFIG", t.TempDir())
+	t.Setenv("DOCKER_CONTEXT", "")
+	t.Setenv("DOCKER_HOST", "ssh://deploy@swarm.example.com")
+
+	for _, opts := range []ConnectOptions{{}, {Context: "default"}} {
+		ep, err := resolveEndpoint(opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if ep.name != "default" || ep.host != "ssh://deploy@swarm.example.com" {
+			t.Errorf("resolveEndpoint(%+v) = %+v, want the default context at DOCKER_HOST", opts, ep)
+		}
+	}
+	list, err := (&API{ctxName: "default"}).Contexts()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// shown like every other endpoint: without the ssh user name
+	if list[0].Name != "default" || list[0].Endpoint != "ssh://swarm.example.com" {
+		t.Errorf("default context listed as %+v", list[0])
+	}
+
+	t.Setenv("DOCKER_HOST", "")
+	ep, _ := resolveEndpoint(ConnectOptions{Context: "default"})
+	if ep.host != client.DefaultDockerHost {
+		t.Errorf("without DOCKER_HOST the default context is %q, want the local socket", ep.host)
 	}
 }

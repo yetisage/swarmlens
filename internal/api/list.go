@@ -148,7 +148,6 @@ func (a *API) Tasks(ctx context.Context, q TaskQuery) ([]Task, error) {
 	}
 	nodes := a.nodeNameMap(ctx, 30*time.Second)
 
-	containerIDs := make([]string, 0, len(tasks))
 	out := make([]Task, 0, len(tasks))
 	for _, t := range tasks {
 		si := bySvc[t.ServiceID]
@@ -182,13 +181,9 @@ func (a *API) Tasks(ctx context.Context, q TaskQuery) ([]Task, error) {
 		if st := t.Status.ContainerStatus; st != nil {
 			r.ContainerID = st.ContainerID
 			r.ExitCode = st.ExitCode
-			if st.ContainerID != "" {
-				containerIDs = append(containerIDs, st.ContainerID)
-			}
 		}
 		out = append(out, r)
 	}
-	a.trackContainers(containerIDs)
 
 	// Newest first within a name, so a slot's history reads top-down.
 	sort.SliceStable(out, func(i, j int) bool {

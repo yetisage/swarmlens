@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -170,9 +171,6 @@ func TestTasksDeriveNamesAndResolveNodesAndStacks(t *testing.T) {
 	}
 	if r := byID["task0000000002"]; r.Name != "agent.worker-1" || r.Error == "" {
 		t.Errorf("global task = %+v", r)
-	}
-	if !a.isSwarmContainer("container0000000001") {
-		t.Error("task containers must be tracked for the event filter")
 	}
 }
 
@@ -409,6 +407,62 @@ func TestRemoveStackUnknownStackFails(t *testing.T) {
 	}
 }
 
+// The objects of a stack disappear on their own as its tasks stop, so one
+// that is already gone when it is removed counts as removed.
+func TestRemoveStackTreatsGoneObjectsAsRemoved(t *testing.T) {
+	gone := func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "No such object"})
+	}
+	a := newTestAPI(t, route(t, map[string]http.HandlerFunc{
+		"/services": func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, []swarm.Service{{ID: "svc1", Spec: swarm.ServiceSpec{Annotations: swarm.Annotations{Name: "shop_web"}}}})
+		},
+		"/networks": func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, []map[string]any{{"Name": "shop_default", "Id": "net1"}})
+		},
+		"/secrets":       func(w http.ResponseWriter, r *http.Request) { writeJSON(t, w, []swarm.Secret{{ID: "sec1"}}) },
+		"/configs":       func(w http.ResponseWriter, r *http.Request) { writeJSON(t, w, []swarm.Config{{ID: "cfg1"}}) },
+		"/services/svc1": gone, "/networks/net1": gone, "/secrets/sec1": gone, "/configs/cfg1": gone,
+	}))
+	start := time.Now()
+	if err := a.RemoveStack(context.Background(), "shop"); err != nil {
+		t.Fatalf("RemoveStack: %v", err)
+	}
+	if took := time.Since(start); took > 3*time.Second {
+		t.Errorf("took %v: a network that is gone must not be retried until the deadline", took)
+	}
+}
+
+// Everything is listed before anything is removed: a listing that fails must
+// leave the stack whole, not half removed.
+func TestRemoveStackRemovesNothingWhenAListingFails(t *testing.T) {
+	var removed []string
+	record := func(w http.ResponseWriter, r *http.Request) {
+		removed = append(removed, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}
+	a := newTestAPI(t, route(t, map[string]http.HandlerFunc{
+		"/services": func(w http.ResponseWriter, r *http.Request) {
+			writeJSON(t, w, []swarm.Service{{ID: "svc1", Spec: swarm.ServiceSpec{Annotations: swarm.Annotations{Name: "shop_web"}}}})
+		},
+		"/networks": func(w http.ResponseWriter, r *http.Request) { writeJSON(t, w, []map[string]any{}) },
+		"/secrets": func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusForbidden)
+			_ = json.NewEncoder(w).Encode(map[string]string{"message": "secrets are not for you"})
+		},
+		"/configs":       func(w http.ResponseWriter, r *http.Request) { writeJSON(t, w, []swarm.Config{}) },
+		"/services/svc1": record,
+	}))
+	err := a.RemoveStack(context.Background(), "shop")
+	if err == nil || !strings.Contains(err.Error(), "secrets are not for you") {
+		t.Fatalf("err = %v, want the listing failure", err)
+	}
+	if len(removed) != 0 {
+		t.Errorf("removed %v although a listing had failed", removed)
+	}
+}
+
 func TestUpdateServiceSpecRejectsUnknownFields(t *testing.T) {
 	a := newTestAPI(t, route(t, map[string]http.HandlerFunc{}))
 	err := a.UpdateServiceSpec(context.Background(), "svc1", 3, "Name: web\nTypoField: 1\n")
@@ -512,35 +566,112 @@ func TestEventActionDetailBecomesAnAttribute(t *testing.T) {
 }
 
 func TestEventFilterIgnoresForeignContainers(t *testing.T) {
-	a := newTestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
-	a.trackContainers([]string{"swarmcontainer"})
-
-	mk := func(typ, id string) bool {
-		m := toEventMessage(typ, id)
-		return a.relevant(m)
+	mk := func(typ, action string, attrs map[string]string) ev.Message {
+		m := toEventMessage(typ, "someid")
+		m.Action = ev.Action(action)
+		m.Actor.Attributes = attrs
+		return m
 	}
-	if !mk("service", "x") || !mk("node", "x") || !mk("secret", "x") || !mk("config", "x") {
-		t.Error("swarm-scope events must pass")
-	}
-	for _, c := range []struct {
-		typ, action string
-		pass        bool
-	}{
-		{"network", "create", true}, {"network", "destroy", true}, {"network", "connect", false}, {"network", "disconnect", false},
-		{"volume", "create", true}, {"volume", "mount", false}, {"volume", "unmount", false}, {"volume", "destroy", true},
-		{"container", "start", true}, {"container", "exec_start: sh -c ls", false}, {"container", "exec_die", false}, {"container", "attach", false},
-	} {
-		m := toEventMessage(c.typ, "swarmcontainer")
-		m.Action = ev.Action(c.action)
-		if got := a.relevant(m); got != c.pass {
-			t.Errorf("%s %q: relevant = %v, want %v", c.typ, c.action, got, c.pass)
+	for _, typ := range []string{"service", "node", "secret", "config"} {
+		if !relevant(mk(typ, "update", nil)) {
+			t.Errorf("swarm-scope %s events must pass", typ)
 		}
 	}
-	if !mk("container", "swarmcontainer") {
-		t.Error("known swarm containers must pass")
+	task := map[string]string{taskIDLabel: "t1", "com.docker.swarm.service.name": "web"}
+	for _, c := range []struct {
+		typ, action string
+		attrs       map[string]string
+		pass        bool
+	}{
+		{"network", "create", nil, true}, {"network", "destroy", nil, true}, {"network", "connect", nil, false}, {"network", "disconnect", nil, false},
+		{"volume", "create", nil, true}, {"volume", "mount", nil, false}, {"volume", "unmount", nil, false}, {"volume", "destroy", nil, true},
+		// a task's container passes from its very first event: no listing has to know it first
+		{"container", "create", task, true}, {"container", "start", task, true}, {"container", "die", task, true},
+		{"container", "health_status: healthy", task, true},
+		{"container", "exec_start: sh -c ls", task, false}, {"container", "exec_die", task, false},
+		{"container", "attach", task, false}, {"container", "resize", task, false},
+		// containers that are not swarm tasks are somebody else's business
+		{"container", "start", nil, false}, {"container", "die", map[string]string{"name": "nginx"}, false},
+	} {
+		if got := relevant(mk(c.typ, c.action, c.attrs)); got != c.pass {
+			t.Errorf("%s %q %v: relevant = %v, want %v", c.typ, c.action, c.attrs, got, c.pass)
+		}
 	}
-	if mk("container", "othercontainer") {
-		t.Error("unrelated host containers must be filtered out")
+}
+
+func TestBackoffPolicyStep(t *testing.T) {
+	p := backoffPolicy{initial: time.Second, max: 8 * time.Second}
+	type step struct {
+		delay        time.Duration
+		worked       bool
+		wait, follow time.Duration
+	}
+	for i, c := range []step{
+		{time.Second, false, time.Second, 2 * time.Second},
+		{2 * time.Second, false, 2 * time.Second, 4 * time.Second},
+		{4 * time.Second, false, 4 * time.Second, 8 * time.Second},
+		{8 * time.Second, false, 8 * time.Second, 8 * time.Second}, // capped
+		{8 * time.Second, true, time.Second, 2 * time.Second},      // a stream that worked starts over
+		{0, false, time.Second, 2 * time.Second},                   // the zero value is safe
+	} {
+		if wait, next := p.step(c.delay, c.worked); wait != c.wait || next != c.follow {
+			t.Errorf("step %d (%v, worked=%v) = %v, %v; want %v, %v", i, c.delay, c.worked, wait, next, c.wait, c.follow)
+		}
+	}
+}
+
+// The reconnect delay doubles while the daemon keeps failing and starts over
+// after a stream that worked; it used to stay at its high-water mark for the
+// rest of the session.
+func TestEventsReconnectDelayStartsOverAfterAHealthyStream(t *testing.T) {
+	var mu sync.Mutex
+	var starts, ends []time.Time
+	attempt := 0
+	a := newTestAPI(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/events") {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		mu.Lock()
+		attempt++
+		n := attempt
+		starts = append(starts, time.Now())
+		mu.Unlock()
+		w.Header().Set("Content-Type", "application/jsonl")
+		w.WriteHeader(http.StatusOK)
+		w.(http.Flusher).Flush()
+		if n == 3 { // a stream that works: one event, then up for a while
+			_ = json.NewEncoder(w).Encode(map[string]any{"Type": "service", "Action": "update", "Actor": map[string]any{"ID": "s"}})
+			w.(http.Flusher).Flush()
+			time.Sleep(150 * time.Millisecond)
+		}
+		mu.Lock()
+		ends = append(ends, time.Now())
+		mu.Unlock()
+	}))
+	a.reconnect = backoffPolicy{initial: 100 * time.Millisecond, max: 800 * time.Millisecond, healthy: time.Hour}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	go func() { _ = a.Events(ctx, func(Event) {}) }()
+	deadline := time.Now().Add(8 * time.Second)
+	for time.Now().Before(deadline) {
+		mu.Lock()
+		done := len(starts) >= 4 && len(ends) >= 3
+		mu.Unlock()
+		if done {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if len(starts) < 4 {
+		t.Fatalf("only %d connection attempts", len(starts))
+	}
+	// without the reset the delay after attempt 3 is 400ms (100, 200, 400)
+	if gap := starts[3].Sub(ends[2]); gap > 300*time.Millisecond {
+		t.Errorf("reconnected after %v, want about 100ms: the delay must start over after a stream that worked", gap.Round(time.Millisecond))
 	}
 }
 

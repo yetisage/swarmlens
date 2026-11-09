@@ -4,11 +4,13 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/docker/docker/api/types/swarm"
 )
@@ -171,5 +173,97 @@ func TestServiceLogsAreAttributedToTasks(t *testing.T) {
 	}
 	if all[1].Source != "web.2" || !all[1].Stderr || !strings.HasPrefix(all[1].Time.Format(time.RFC3339), "2026-11-08T15:00:02") {
 		t.Errorf("line 1 = %+v", all[1])
+	}
+}
+
+// A task that never ends its lines must not make the reader buffer without
+// limit: an overlong line comes out in pieces, and no piece splits a character.
+func TestReadLogLinesBoundsLongLines(t *testing.T) {
+	long := strings.Repeat("é", 100_000) // 200 kB of two-byte characters
+	for name, stream := range map[string][]byte{
+		"multiplexed": append(frame(1, long), frame(1, "\nnext\n")...),
+		"tty":         []byte(long + "\nnext\n"),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var pieces []string
+			if err := readLogLines(bytes.NewReader(stream), func(_ bool, l string) { pieces = append(pieces, l) }); err != nil {
+				t.Fatal(err)
+			}
+			if len(pieces) < 4 || pieces[len(pieces)-1] != "next" {
+				t.Fatalf("got %d lines, last %q", len(pieces), pieces[len(pieces)-1])
+			}
+			for _, p := range pieces[:len(pieces)-1] {
+				if len(p) > maxLogLine {
+					t.Errorf("a line of %d bytes, limit %d", len(p), maxLogLine)
+				}
+				if !utf8.ValidString(p) {
+					t.Error("a character was split between two lines")
+				}
+			}
+			if got := strings.Join(pieces[:len(pieces)-1], ""); got != long {
+				t.Errorf("text changed: %d bytes in, %d out", len(long), len(got))
+			}
+		})
+	}
+}
+
+// 8 MiB without a newline (a progress bar redrawn with \r, say) used to be
+// held in memory and delivered as a single line.
+func TestReadLogLinesNeverBuffersWithoutLimit(t *testing.T) {
+	var data []byte
+	chunk := strings.Repeat("x", 1<<20)
+	for i := 0; i < 8; i++ {
+		data = append(data, frame(1, chunk)...)
+	}
+	total, longest := 0, 0
+	if err := readLogLines(bytes.NewReader(data), func(_ bool, l string) {
+		total += len(l)
+		longest = max(longest, len(l))
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if longest > maxLogLine || total != 8<<20 {
+		t.Errorf("longest line %d bytes (limit %d), %d of %d bytes delivered", longest, maxLogLine, total, 8<<20)
+	}
+}
+
+// failAfter yields its data, then fails with err.
+type failAfter struct {
+	data []byte
+	err  error
+}
+
+func (f *failAfter) Read(p []byte) (int, error) {
+	if len(f.data) == 0 {
+		return 0, f.err
+	}
+	n := copy(p, f.data)
+	f.data = f.data[n:]
+	return n, nil
+}
+
+// A stream that stops in the middle of a frame is the daemon going away and
+// ends quietly; a read error is not, and must reach the caller.
+func TestReadLogLinesReportsReadErrors(t *testing.T) {
+	boom := errors.New("connection reset by peer")
+	frameData := frame(1, "hello world\n")
+	for name, c := range map[string]struct {
+		data    []byte
+		wantErr error
+	}{
+		"mid payload":   {frameData[:len(frameData)-3], boom},
+		"mid header":    {frameData[:5], boom},
+		"between lines": {frame(1, "one\n"), boom},
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := readLogLines(&failAfter{data: c.data, err: c.wantErr}, func(bool, string) {})
+			if !errors.Is(err, boom) {
+				t.Errorf("err = %v, want the read error", err)
+			}
+		})
+	}
+	// truncation by EOF stays quiet
+	if err := readLogLines(bytes.NewReader(frameData[:len(frameData)-3]), func(bool, string) {}); err != nil {
+		t.Errorf("a truncated stream must end quietly, got %v", err)
 	}
 }

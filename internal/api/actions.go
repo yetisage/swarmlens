@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/swarm"
@@ -103,7 +104,11 @@ func (a *API) Remove(ctx context.Context, kind Kind, id string) error {
 // RemoveStack implements Backend, like `docker stack rm`: the stack's
 // services go first, then its networks, secrets and configs. Volumes are
 // kept. Networks stay busy until the tasks have stopped, so they are
-// retried for a few seconds.
+// retried for a few seconds. Everything is listed before anything is
+// removed, so a listing that fails (a permission, say) leaves the stack
+// whole instead of half removed, and an object that is already gone counts
+// as removed: the objects of a stack disappear on their own as its tasks
+// stop.
 func (a *API) RemoveStack(ctx context.Context, name string) error {
 	f := filters.NewArgs(filters.Arg("label", StackLabel+"="+name))
 
@@ -115,17 +120,26 @@ func (a *API) RemoveStack(ctx context.Context, name string) error {
 	if err != nil {
 		return err
 	}
-	secrets, _ := a.cli.SecretList(ctx, swarm.SecretListOptions{Filters: f})
-	configs, _ := a.cli.ConfigList(ctx, swarm.ConfigListOptions{Filters: f})
+	secrets, err := a.cli.SecretList(ctx, swarm.SecretListOptions{Filters: f})
+	if err != nil {
+		return err
+	}
+	configs, err := a.cli.ConfigList(ctx, swarm.ConfigListOptions{Filters: f})
+	if err != nil {
+		return err
+	}
 	if len(svcs)+len(nets)+len(secrets)+len(configs) == 0 {
 		return fmt.Errorf("stack %q not found", name)
 	}
 
 	var errs []error
-	for _, s := range svcs {
-		if err := a.cli.ServiceRemove(ctx, s.ID); err != nil {
-			errs = append(errs, fmt.Errorf("service %s: %w", s.Spec.Name, err))
+	failed := func(what, name string, err error) {
+		if err != nil && !cerrdefs.IsNotFound(err) {
+			errs = append(errs, fmt.Errorf("%s %s: %w", what, name, err))
 		}
+	}
+	for _, s := range svcs {
+		failed("service", s.Spec.Name, a.cli.ServiceRemove(ctx, s.ID))
 	}
 	pending := nets
 	deadline := time.Now().Add(10 * time.Second)
@@ -134,7 +148,7 @@ func (a *API) RemoveStack(ctx context.Context, name string) error {
 		var left []network.Summary
 		var lastErr error
 		for _, n := range pending {
-			if err := a.cli.NetworkRemove(ctx, n.ID); err != nil {
+			if err := a.cli.NetworkRemove(ctx, n.ID); err != nil && !cerrdefs.IsNotFound(err) {
 				left = append(left, n)
 				busy = append(busy, n.Name)
 				lastErr = err
@@ -154,14 +168,10 @@ func (a *API) RemoveStack(ctx context.Context, name string) error {
 		}
 	}
 	for _, s := range secrets {
-		if err := a.cli.SecretRemove(ctx, s.ID); err != nil {
-			errs = append(errs, fmt.Errorf("secret %s: %w", s.Spec.Name, err))
-		}
+		failed("secret", s.Spec.Name, a.cli.SecretRemove(ctx, s.ID))
 	}
 	for _, c := range configs {
-		if err := a.cli.ConfigRemove(ctx, c.ID); err != nil {
-			errs = append(errs, fmt.Errorf("config %s: %w", c.Spec.Name, err))
-		}
+		failed("config", c.Spec.Name, a.cli.ConfigRemove(ctx, c.ID))
 	}
 	return errors.Join(errs...)
 }

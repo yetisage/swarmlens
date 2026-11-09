@@ -28,10 +28,11 @@ type API struct {
 	ctxName  string
 	endpoint string
 
-	mu              sync.RWMutex
-	nodeNames       map[string]string // node id -> hostname
-	nodeNamesAt     time.Time
-	swarmContainers map[string]bool // container ids known to belong to swarm tasks
+	reconnect backoffPolicy // how the event stream reconnects
+
+	mu          sync.RWMutex
+	nodeNames   map[string]string // node id -> hostname
+	nodeNamesAt time.Time
 }
 
 var _ Backend = (*API)(nil)
@@ -67,11 +68,11 @@ func Connect(opts ConnectOptions) (*API, error) {
 // NewWithClient wraps an existing client (used by tests).
 func NewWithClient(cli *client.Client) *API {
 	return &API{
-		cli:             cli,
-		ctxName:         "default",
-		endpoint:        cli.DaemonHost(),
-		nodeNames:       map[string]string{},
-		swarmContainers: map[string]bool{},
+		cli:       cli,
+		ctxName:   "default",
+		endpoint:  cli.DaemonHost(),
+		reconnect: defaultBackoff,
+		nodeNames: map[string]string{},
 	}
 }
 
@@ -107,19 +108,28 @@ func resolveEndpoint(opts ConnectOptions) (endpoint, error) {
 	}
 	name := opts.Context
 	if name == "" {
-		if h := os.Getenv("DOCKER_HOST"); h != "" {
-			ep := endpoint{name: "default", host: h}
-			ep.fromEnvTLS()
-			return ep, nil
+		if os.Getenv("DOCKER_HOST") != "" {
+			return defaultEndpoint(), nil
 		}
 		name = currentContextName()
 	}
 	if name == "" || name == "default" {
-		ep := endpoint{name: "default", host: client.DefaultDockerHost}
-		ep.fromEnvTLS()
-		return ep, nil
+		return defaultEndpoint(), nil
 	}
 	return contextEndpoint(name)
+}
+
+// defaultEndpoint is the "default" docker context: DOCKER_HOST and its TLS
+// variables, else the local socket. Asking for that context by name (--context
+// default, :ctx default) must land here too, as with the docker CLI.
+func defaultEndpoint() endpoint {
+	host := os.Getenv("DOCKER_HOST")
+	if host == "" {
+		host = client.DefaultDockerHost
+	}
+	ep := endpoint{name: "default", host: host}
+	ep.fromEnvTLS()
+	return ep
 }
 
 // fromEnvTLS applies DOCKER_TLS_VERIFY / DOCKER_CERT_PATH.
@@ -325,24 +335,6 @@ func copyMap(in map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
-}
-
-// trackContainers records container ids that belong to swarm tasks so the
-// event stream can ignore unrelated host containers.
-func (a *API) trackContainers(ids []string) {
-	a.mu.Lock()
-	for _, id := range ids {
-		if id != "" {
-			a.swarmContainers[id] = true
-		}
-	}
-	a.mu.Unlock()
-}
-
-func (a *API) isSwarmContainer(id string) bool {
-	a.mu.RLock()
-	defer a.mu.RUnlock()
-	return a.swarmContainers[id]
 }
 
 // ShortID truncates a swarm/docker id for display.

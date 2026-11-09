@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/docker/docker/api/types/container"
 )
@@ -155,9 +156,67 @@ func parseLogLine(raw string) parsedLine {
 	return p
 }
 
+// maxLogLine bounds one line of a log stream. A task that never ends its
+// lines (a progress bar redrawn with \r, a binary dump) must not make us
+// buffer without limit: such a line comes out in pieces of this size.
+const maxLogLine = 64 << 10
+
+// lineSplitter cuts a byte stream into lines of bounded length.
+type lineSplitter struct{ buf []byte }
+
+// cutPoint is where to cut an overlong line: at the limit, without splitting
+// a character.
+func cutPoint(b []byte) int {
+	cut := maxLogLine
+	for cut > maxLogLine-utf8.UTFMax && !utf8.RuneStart(b[cut]) {
+		cut--
+	}
+	return cut
+}
+
+// write adds data and emits every complete line, and pieces of an overlong one.
+func (l *lineSplitter) write(p []byte, emit func(string)) {
+	l.buf = append(l.buf, p...)
+	for {
+		i := bytes.IndexByte(l.buf, '\n')
+		if i < 0 {
+			break
+		}
+		line := l.buf[:i]
+		for len(line) > maxLogLine {
+			cut := cutPoint(line)
+			emit(string(line[:cut]))
+			line = line[cut:]
+		}
+		emit(strings.TrimRight(string(line), "\r"))
+		l.buf = l.buf[i+1:]
+	}
+	for len(l.buf) > maxLogLine {
+		cut := cutPoint(l.buf)
+		emit(string(l.buf[:cut]))
+		l.buf = l.buf[cut:]
+	}
+	switch {
+	case len(l.buf) == 0:
+		l.buf = nil
+	case cap(l.buf) > 4*len(l.buf)+4096:
+		l.buf = append([]byte(nil), l.buf...) // let go of what was consumed
+	}
+}
+
+// flush emits what is left when the stream ends.
+func (l *lineSplitter) flush(emit func(string)) {
+	if len(l.buf) > 0 {
+		emit(strings.TrimRight(string(l.buf), "\r"))
+		l.buf = nil
+	}
+}
+
 // readLogLines reads a log stream and calls onLine for every line. The
 // engine multiplexes stdout and stderr into 8-byte-header frames unless the
 // task has a TTY, in which case the stream is plain text; both are handled.
+// A stream that ends in the middle of a frame ends quietly (the daemon went
+// away); any other read error is returned.
 func readLogLines(r io.Reader, onLine func(stderr bool, line string)) error {
 	br := bufio.NewReaderSize(r, 64*1024)
 	head, err := br.Peek(8)
@@ -168,27 +227,39 @@ func readLogLines(r io.Reader, onLine func(stderr bool, line string)) error {
 		return err
 	}
 	if !looksMultiplexed(head) {
-		sc := bufio.NewScanner(br)
-		sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
-		for sc.Scan() {
-			onLine(false, strings.TrimRight(sc.Text(), "\r"))
+		var split lineSplitter
+		emit := func(line string) { onLine(false, line) }
+		chunk := make([]byte, 32*1024)
+		for {
+			n, err := br.Read(chunk)
+			split.write(chunk[:n], emit)
+			if err != nil {
+				split.flush(emit)
+				if err == io.EOF {
+					return nil
+				}
+				return err
+			}
 		}
-		return sc.Err()
 	}
 
-	var pending [3][]byte
+	var split [3]lineSplitter // by stream: stdin, stdout, stderr
+	flushAll := func() {
+		for stream := range split {
+			split[stream].flush(func(line string) { onLine(stream == 2, line) })
+		}
+	}
+	end := func(err error) error {
+		flushAll()
+		if err == io.EOF || err == io.ErrUnexpectedEOF {
+			return nil
+		}
+		return err
+	}
 	hdr := make([]byte, 8)
 	for {
 		if _, err := io.ReadFull(br, hdr); err != nil {
-			for stream, rest := range pending {
-				if len(rest) > 0 {
-					onLine(stream == 2, strings.TrimRight(string(rest), "\r"))
-				}
-			}
-			if err == io.EOF || err == io.ErrUnexpectedEOF {
-				return nil
-			}
-			return err
+			return end(err)
 		}
 		stream, n := hdr[0], binary.BigEndian.Uint32(hdr[4:8])
 		if stream > 2 || n > 8<<20 {
@@ -196,17 +267,9 @@ func readLogLines(r io.Reader, onLine func(stderr bool, line string)) error {
 		}
 		payload := make([]byte, n)
 		if _, err := io.ReadFull(br, payload); err != nil {
-			return nil
+			return end(err)
 		}
-		pending[stream] = append(pending[stream], payload...)
-		for {
-			i := bytes.IndexByte(pending[stream], '\n')
-			if i < 0 {
-				break
-			}
-			onLine(stream == 2, strings.TrimRight(string(pending[stream][:i]), "\r"))
-			pending[stream] = pending[stream][i+1:]
-		}
+		split[stream].write(payload, func(line string) { onLine(stream == 2, line) })
 	}
 }
 
