@@ -22,6 +22,8 @@ import (
 
 // Options configures the UI.
 type Options struct {
+	// Backend is the swarm to show. In read-only mode it is wrapped so that
+	// it cannot be changed, however a change is asked for.
 	Backend api.Backend
 	// Connect opens another docker context; nil disables switching.
 	Connect func(name string) (api.Backend, error)
@@ -109,6 +111,7 @@ func New(opt Options) *app {
 		scope:        opt.Stack,
 		static:       opt.Static,
 	}
+	a.be = a.guard(a.be)
 	if a.refreshEvery <= 0 {
 		a.refreshEvery = time.Duration(cfg.RefreshRate * float64(time.Second))
 	}
@@ -145,6 +148,7 @@ func Run(opt Options) error {
 	a.SetProgram(p)
 	_, err := p.Run()
 	a.stopEvents()
+	_ = a.be.Close()
 	return err
 }
 
@@ -153,6 +157,7 @@ func Run(opt Options) error {
 func Render(opt Options, w, h int) string {
 	opt.Static = true
 	a := New(opt)
+	defer func() { _ = a.be.Close() }()
 	a.w, a.h = w, h
 	a.loadSync()
 	return a.screen().Text()
@@ -717,6 +722,14 @@ func (a *app) setScope(stack string) tea.Cmd {
 
 // ---- backend switching ----
 
+// guard makes a backend read-only if the session is.
+func (a *app) guard(be api.Backend) api.Backend {
+	if a.readOnly {
+		return api.ReadOnly(be)
+	}
+	return be
+}
+
 func (a *app) switchContext(name string) tea.Cmd {
 	if a.opt.Connect == nil {
 		a.flash(flashErr, "Context switching is not available")
@@ -739,7 +752,9 @@ func (a *app) onSwitched(m switchedMsg) tea.Cmd {
 		return nil
 	}
 	a.stopEvents()
-	a.be = m.be
+	old := a.be
+	a.be = a.guard(m.be)
+	go func() { _ = old.Close() }() // what the old backend holds open (ssh) goes with it
 	a.summary = nil
 	a.events = nil
 	a.scope = ""

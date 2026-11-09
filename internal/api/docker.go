@@ -201,6 +201,10 @@ func tlsConfig(ep endpoint) (*tls.Config, error) {
 	return cfg, nil
 }
 
+// Close implements Backend: it lets go of the idle connections (and, for an
+// ssh:// endpoint, of the ssh processes behind them).
+func (a *API) Close() error { return a.cli.Close() }
+
 // ContextName implements Backend.
 func (a *API) ContextName() string { return a.ctxName }
 

@@ -314,7 +314,9 @@ func taskActions(v *tableView) []action {
 		act("l", "Logs", false, logs),
 		describeAct(v, api.KindTask),
 		yamlAct(v, api.KindTask),
-		act("s", "Shell", true, func() tea.Cmd {
+		// A shell changes whatever it is used for, so read-only mode has no
+		// shell.
+		mut("s", "Shell", func() tea.Cmd {
 			if t, ok := task(); ok {
 				return v.a.shell(t)
 			}

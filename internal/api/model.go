@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"io"
 	"time"
 )
 
@@ -258,10 +259,8 @@ type LogLine struct {
 	Text   string
 }
 
-// Backend is everything the UI needs from a swarm. The real implementation
-// talks to the Docker Engine API; the demo implementation keeps everything
-// in memory.
-type Backend interface {
+// Reader is what the UI needs to look at a swarm.
+type Reader interface {
 	// Identity.
 	ContextName() string
 	Endpoint() string
@@ -281,11 +280,21 @@ type Backend interface {
 	Describe(ctx context.Context, kind Kind, id string) (string, error)
 	YAML(ctx context.Context, kind Kind, id string) (string, error)
 
-	// Streams. Both return when ctx is cancelled.
+	// ServiceSpec is the YAML of a service spec and the version it was read
+	// at, to be edited and handed back to UpdateServiceSpec.
+	ServiceSpec(ctx context.Context, id string) (yaml string, version uint64, err error)
+}
+
+// Streamer is what follows a swarm live. Both return when ctx is cancelled.
+type Streamer interface {
 	Logs(ctx context.Context, t LogTarget, o LogOptions, emit func([]LogLine)) error
 	Events(ctx context.Context, emit func(Event)) error
+}
 
-	// Mutations.
+// Mutator is everything that changes a swarm. A read-only session refuses all
+// of it (see ReadOnly), and adding a method here stops ReadOnly from
+// compiling until it says what to do with it.
+type Mutator interface {
 	ScaleService(ctx context.Context, id string, replicas int) error
 	RestartService(ctx context.Context, id string) error
 	RollbackService(ctx context.Context, id string) error
@@ -293,11 +302,19 @@ type Backend interface {
 	SetNodeRole(ctx context.Context, id string, r NodeRole) error
 	Remove(ctx context.Context, kind Kind, id string) error
 	RemoveStack(ctx context.Context, name string) error
-
-	// Spec editing: the YAML of a service spec and its version, and the
-	// reverse operation.
-	ServiceSpec(ctx context.Context, id string) (yaml string, version uint64, err error)
 	UpdateServiceSpec(ctx context.Context, id string, version uint64, yaml string) error
+}
+
+// Backend is everything the UI needs from a swarm. The real implementation
+// talks to the Docker Engine API; the demo implementation keeps everything
+// in memory.
+type Backend interface {
+	Reader
+	Streamer
+	Mutator
+	// Close releases what the backend holds open: connections, helper
+	// processes. It is called when the backend is left for another one.
+	io.Closer
 }
 
 // Switcher is implemented by backends that can list and switch docker

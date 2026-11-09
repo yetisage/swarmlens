@@ -87,6 +87,9 @@ func newBackend(name string, clock func() time.Time, chatter bool) *Backend {
 // Simulated implements api.Simulated.
 func (b *Backend) Simulated() bool { return true }
 
+// Close implements api.Backend; there is nothing to release.
+func (b *Backend) Close() error { return nil }
+
 func mkID(kind, name string) string {
 	sum := sha256.Sum256([]byte(kind + "/" + name))
 	return strings.ToLower(base32.StdEncoding.EncodeToString(sum[:])[:25])

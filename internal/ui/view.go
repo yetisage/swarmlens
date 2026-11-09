@@ -66,7 +66,7 @@ func keyLabel(k string) string {
 // action is a hint that also does something.
 type action struct {
 	hint
-	mutates bool // changes the swarm: refused in read-only mode
+	mutates bool // changes the swarm or what runs in it: refused in read-only mode
 	run     func() tea.Cmd
 }
 

@@ -215,6 +215,9 @@ func (a *app) copy(text string) {
 // the daemon belongs to can be reached.
 func (a *app) shell(t api.Task) tea.Cmd {
 	switch {
+	case a.readOnly:
+		a.flash(flashWarn, "Command disabled in read-only mode")
+		return nil
 	case isSimulated(a.be):
 		a.flash(flashWarn, "Shells are not available in demo mode")
 		return nil

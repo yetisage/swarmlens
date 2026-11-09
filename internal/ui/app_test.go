@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -11,6 +12,7 @@ import (
 	"github.com/muesli/termenv"
 
 	"swarmlens/internal/api"
+	"swarmlens/internal/config"
 )
 
 func TestInitialViewIsServicesWithHeader(t *testing.T) {
@@ -1126,4 +1128,62 @@ func TestLogPrefixColourIsAlwaysAPaletteEntry(t *testing.T) {
 			t.Fatalf("prefixColor(%d) = %#x, not in the palette", i, int(c))
 		}
 	}
+}
+
+// Read-only is not only a matter of hiding keys: the backend refuses changes,
+// whatever asks, and still does after the context is switched.
+func TestReadOnlyIsEnforcedByTheBackend(t *testing.T) {
+	opt := testOpts()
+	opt.ReadOnly = true
+	a := newTestAppOpts(t, opt, 140, 38)
+	refused := func() {
+		t.Helper()
+		ctx := context.Background()
+		for name, err := range map[string]error{
+			"Remove":       a.be.Remove(ctx, api.KindService, "x"),
+			"ScaleService": a.be.ScaleService(ctx, "x", 1),
+			"RemoveStack":  a.be.RemoveStack(ctx, "shop"),
+		} {
+			if !errors.Is(err, api.ErrReadOnly) {
+				t.Errorf("%s on %s: %v, want ErrReadOnly", name, a.be.ContextName(), err)
+			}
+		}
+	}
+	refused()
+	a.command("ctx lab")
+	if a.be.ContextName() != "lab" {
+		t.Fatalf("context = %q", a.be.ContextName())
+	}
+	refused()
+	a.command("nodes")
+	mustContain(t, a.screenText(), "nodes(all)[7]", "lab [RO]") // reading still works
+}
+
+func TestReadOnlyFromTheConfigFileWrapsTheBackendToo(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.ReadOnly = true
+	opt := testOpts()
+	opt.Config = cfg
+	a := newTestAppOpts(t, opt, 140, 38)
+	if err := a.be.Remove(context.Background(), api.KindService, "x"); !errors.Is(err, api.ErrReadOnly) {
+		t.Errorf("Remove: %v, want ErrReadOnly", err)
+	}
+}
+
+// A shell changes whatever it is used for: read-only mode offers none, and
+// says why if it is asked for anyway.
+func TestReadOnlyModeHasNoShell(t *testing.T) {
+	opt := testOpts()
+	opt.ReadOnly = true
+	ro := newTestAppOpts(t, opt, 140, 38)
+	ro.command("tasks")
+	mustNotContain(t, ro.screenText(), "Shell")
+	ro.press("s")
+	if got := ro.flashMsg.text; got != "Command disabled in read-only mode" {
+		t.Errorf("the shell key flashed %q, want it refused", got)
+	}
+
+	rw := newTestApp(t, 140, 38)
+	rw.command("tasks")
+	mustContain(t, rw.screenText(), "Shell")
 }
