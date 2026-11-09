@@ -58,7 +58,7 @@ func withClock(t *testing.T, at time.Time) {
 }
 
 // frozen is a little after everything in the fixtures happened.
-var frozen = time.Date(2026, 11, 9, 15, 0, 0, 0, time.UTC)
+var frozen = time.Date(2026, 11, 9, 16, 30, 0, 0, time.UTC)
 
 // filterList applies the daemon's list filters that swarmlens uses to a
 // recorded list: a map of filter name to the values it accepts.

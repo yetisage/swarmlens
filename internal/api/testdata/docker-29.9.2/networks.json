@@ -5,7 +5,39 @@
       "Network": ""
     },
     "ConfigOnly": false,
-    "Created": "2026-11-09T14:25:25.51996551Z",
+    "Created": "2026-11-09T16:11:40.174782374Z",
+    "Driver": "overlay",
+    "EnableIPv4": true,
+    "EnableIPv6": false,
+    "IPAM": {
+      "Config": [
+        {
+          "Gateway": "10.0.2.1",
+          "Subnet": "10.0.2.0/24"
+        }
+      ],
+      "Driver": "default",
+      "Options": null
+    },
+    "Id": "nay8fitdso9ruzyspfi2t4c5a",
+    "Ingress": false,
+    "Internal": false,
+    "Labels": {
+      "com.docker.stack.namespace": "shop"
+    },
+    "Name": "shop_back",
+    "Options": {
+      "com.docker.network.driver.overlay.vxlanid_list": "4098"
+    },
+    "Scope": "swarm"
+  },
+  {
+    "Attachable": false,
+    "ConfigFrom": {
+      "Network": ""
+    },
+    "ConfigOnly": false,
+    "Created": "2026-11-09T16:11:39.522042585Z",
     "Driver": "overlay",
     "EnableIPv4": true,
     "EnableIPv6": false,
@@ -19,7 +51,7 @@
       "Driver": "default",
       "Options": null
     },
-    "Id": "cj7hitan8y0di3k3ffd76lkdq",
+    "Id": "p46tweo17453z762gy8tqfm7r",
     "Ingress": true,
     "Internal": false,
     "Labels": null,
@@ -35,39 +67,7 @@
       "Network": ""
     },
     "ConfigOnly": false,
-    "Created": "2026-11-09T14:25:26.556003481Z",
-    "Driver": "overlay",
-    "EnableIPv4": true,
-    "EnableIPv6": false,
-    "IPAM": {
-      "Config": [
-        {
-          "Gateway": "10.0.2.1",
-          "Subnet": "10.0.2.0/24"
-        }
-      ],
-      "Driver": "default",
-      "Options": null
-    },
-    "Id": "q171fv57n55y62nbhavgr9dji",
-    "Ingress": false,
-    "Internal": false,
-    "Labels": {
-      "com.docker.stack.namespace": "shop"
-    },
-    "Name": "shop_default",
-    "Options": {
-      "com.docker.network.driver.overlay.vxlanid_list": "4098"
-    },
-    "Scope": "swarm"
-  },
-  {
-    "Attachable": false,
-    "ConfigFrom": {
-      "Network": ""
-    },
-    "ConfigOnly": false,
-    "Created": "2026-11-09T14:25:26.554355619Z",
+    "Created": "2026-11-09T16:11:40.173063648Z",
     "Driver": "overlay",
     "EnableIPv4": true,
     "EnableIPv6": false,
@@ -81,40 +81,17 @@
       "Driver": "default",
       "Options": null
     },
-    "Id": "qdvzpywjn24d3kejbx821bzzp",
+    "Id": "pnha75i1rb2yy454ew8q70ulx",
     "Ingress": false,
     "Internal": false,
     "Labels": {
       "com.docker.stack.namespace": "shop"
     },
-    "Name": "shop_back",
+    "Name": "shop_default",
     "Options": {
       "com.docker.network.driver.overlay.vxlanid_list": "4097"
     },
     "Scope": "swarm"
-  },
-  {
-    "Attachable": false,
-    "ConfigFrom": {
-      "Network": ""
-    },
-    "ConfigOnly": false,
-    "Created": "2026-11-09T14:25:24.738290676Z",
-    "Driver": "host",
-    "EnableIPv4": true,
-    "EnableIPv6": false,
-    "IPAM": {
-      "Config": null,
-      "Driver": "default",
-      "Options": null
-    },
-    "Id": "3e3fef6f3a982c1193d31c9618277e1817c5ae78a142fdaaed3a39ba2a2f166e",
-    "Ingress": false,
-    "Internal": false,
-    "Labels": {},
-    "Name": "host",
-    "Options": {},
-    "Scope": "local"
   },
   {
     "Attachable": false,
@@ -168,6 +145,29 @@
     "Internal": false,
     "Labels": {},
     "Name": "none",
+    "Options": {},
+    "Scope": "local"
+  },
+  {
+    "Attachable": false,
+    "ConfigFrom": {
+      "Network": ""
+    },
+    "ConfigOnly": false,
+    "Created": "2026-11-09T14:25:24.738290676Z",
+    "Driver": "host",
+    "EnableIPv4": true,
+    "EnableIPv6": false,
+    "IPAM": {
+      "Config": null,
+      "Driver": "default",
+      "Options": null
+    },
+    "Id": "3e3fef6f3a982c1193d31c9618277e1817c5ae78a142fdaaed3a39ba2a2f166e",
+    "Ingress": false,
+    "Internal": false,
+    "Labels": {},
+    "Name": "host",
     "Options": {},
     "Scope": "local"
   }

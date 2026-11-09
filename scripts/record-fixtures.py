@@ -4,9 +4,11 @@
     python3 scripts/record-fixtures.py internal/api/testdata/docker-29.9.2
 
 It talks to the daemon at $DOCKER_SOCK (default /var/run/docker.sock) with curl,
-through the API version the swarmlens client negotiates (1.51), and writes one
-JSON file per response. The swarm has to hold what the tests expect: see
-internal/api/testdata/docker-29.9.2/README.md for the commands.
+through the newest API version the swarmlens client speaks (1.56, the
+MaxAPIVersion of github.com/moby/moby/client, which is what it negotiates with a
+Docker 29 daemon), and writes one JSON file per response. The swarm has to hold
+what the tests expect: see internal/api/testdata/docker-29.9.2/README.md for the
+commands.
 
 Only what the tests need is kept: the nodes' TLS blobs are dropped, /info is
 reduced to the fields swarmlens reads, and the daemon's data root is replaced by
@@ -18,7 +20,7 @@ import subprocess
 import sys
 
 SOCK = os.environ.get("DOCKER_SOCK", "/var/run/docker.sock")
-API = "/v1.51"
+API = "/v1.56"  # client.MaxAPIVersion
 
 if len(sys.argv) != 2:
     sys.exit(__doc__)
@@ -87,5 +89,6 @@ save("info.json", {
     "Swarm": {k: swarm[k] for k in ("NodeID", "NodeAddr", "LocalNodeState", "ControlAvailable", "Nodes", "Managers")}
     | {"Cluster": {"ID": swarm["Cluster"]["ID"], "Spec": {"Name": swarm["Cluster"]["Spec"]["Name"]}}},
 })
-save("version.json", {"Version": info["ServerVersion"], "ApiVersion": "1.51", "MinAPIVersion": "1.24"})
+version = get("/version")
+save("version.json", {"Version": version["Version"], "ApiVersion": version["ApiVersion"], "MinAPIVersion": version["MinAPIVersion"]})
 print("recorded", len(os.listdir(OUT)), "files in", OUT)

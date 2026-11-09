@@ -1,9 +1,9 @@
 Name:             shop_appcfg
-ID:               a0jwejgoy9v9rabmou6keh46b
+ID:               ulca27up73bcm61rte609itl4
 Stack:            shop
 Labels:           com.docker.stack.namespace=shop
-Created:          2026-11-09 14:25:26 UTC (34m ago)
-Updated:          2026-11-09 14:25:26 UTC (34m ago)
+Created:          2026-11-09 16:11:40 UTC (18m ago)
+Updated:          2026-11-09 16:11:40 UTC (18m ago)
 Size:             10B
 Used By:          shop_api
 Data:

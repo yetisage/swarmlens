@@ -1,4 +1,4 @@
-CreatedAt: "2026-11-09T14:25:25.51992342Z"
+CreatedAt: "2026-11-09T16:11:39.521988478Z"
 Description:
   Engine:
     EngineVersion: 29.9.2
@@ -42,7 +42,7 @@ Description:
   Resources:
     MemoryBytes: 16867737600
     NanoCPUs: 4000000000
-ID: okf0nzz6onffdvoim55yqcrhr
+ID: qs531opjwnjwvvp41wysh44rv
 ManagerStatus:
   Addr: 127.0.0.1:2377
   Leader: true
@@ -54,6 +54,6 @@ Spec:
 Status:
   Addr: 127.0.0.1
   State: ready
-UpdatedAt: "2026-11-09T14:25:28.28265843Z"
+UpdatedAt: "2026-11-09T16:11:41.948139615Z"
 Version:
   Index: 29

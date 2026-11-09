@@ -1,9 +1,9 @@
-CreatedAt: "2026-11-09T14:25:28.959678435Z"
+CreatedAt: "2026-11-09T16:11:42.709309344Z"
 DesiredState: shutdown
-ID: cv6hnf2zobka9r9mhrds94c6b
+ID: oduuqd5dljm8ftogxkfudnca7
 Labels: {}
-NodeID: okf0nzz6onffdvoim55yqcrhr
-ServiceID: jvwk522eh1e6p6znovhll08pg
+NodeID: qs531opjwnjwvvp41wysh44rv
+ServiceID: hf3owhos9gseipaonaxcdk88h
 Slot: 1
 Spec:
   ContainerSpec:
@@ -29,8 +29,8 @@ Status:
   Message: preparing
   PortStatus: {}
   State: rejected
-  Timestamp: "2026-11-09T14:25:29.415308938Z"
-UpdatedAt: "2026-11-09T14:25:29.687733786Z"
+  Timestamp: "2026-11-09T16:11:43.186503433Z"
+UpdatedAt: "2026-11-09T16:11:43.461936512Z"
 Version:
-  Index: 46
+  Index: 47
 Volumes: null

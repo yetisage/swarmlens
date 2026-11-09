@@ -1,7 +1,8 @@
 # Recorded Docker API responses
 
-These are responses of a Docker 29.9.2 swarm (API 1.51, which is what the
-client negotiates), recorded with `scripts/record-fixtures.py`. The tests in
+These are responses of a Docker 29.9.2 swarm (API 1.56, the newest the client
+speaks and what it negotiates with that daemon), recorded with
+`scripts/record-fixtures.py`. The tests in
 `../../inspect_test.go` and `../../tls_test.go` serve them from a fake daemon and
 run the real code against them; the describe and YAML reports made from them are
 the golden files in `../golden`.

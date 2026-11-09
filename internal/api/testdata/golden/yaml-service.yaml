@@ -1,4 +1,4 @@
-CreatedAt: "2026-11-09T14:25:27.464300132Z"
+CreatedAt: "2026-11-09T16:11:41.894281152Z"
 Endpoint:
   Ports:
     - Protocol: tcp
@@ -14,10 +14,10 @@ Endpoint:
         TargetPort: 80
   VirtualIPs:
     - Addr: 10.0.0.3/24
-      NetworkID: cj7hitan8y0di3k3ffd76lkdq
-    - Addr: 10.0.1.2/24
-      NetworkID: qdvzpywjn24d3kejbx821bzzp
-ID: vkjc6op8n20dyl0dtuyxf85hd
+      NetworkID: p46tweo17453z762gy8tqfm7r
+    - Addr: 10.0.2.2/24
+      NetworkID: nay8fitdso9ruzyspfi2t4c5a
+ID: kzmfj1c2xci3hvm8bkm6ej8ty
 Spec:
   EndpointSpec:
     Mode: vip
@@ -36,7 +36,7 @@ Spec:
   TaskTemplate:
     ContainerSpec:
       Configs:
-        - ConfigID: a0jwejgoy9v9rabmou6keh46b
+        - ConfigID: ulca27up73bcm61rte609itl4
           ConfigName: shop_appcfg
           File:
             GID: "0"
@@ -60,16 +60,16 @@ Spec:
             Mode: 292
             Name: dbpass
             UID: "0"
-          SecretID: fvjofjf7xctq1i0yy21uh9wbo
+          SecretID: jn1j6wiwfrczyfbiwtfnsx7dp
           SecretName: shop_dbpass
     ForceUpdate: 0
     Networks:
       - Aliases:
           - api
-        Target: qdvzpywjn24d3kejbx821bzzp
+        Target: nay8fitdso9ruzyspfi2t4c5a
     Placement: {}
     Resources: {}
     Runtime: container
-UpdatedAt: "2026-11-09T14:25:27.465863268Z"
+UpdatedAt: "2026-11-09T16:11:41.894980351Z"
 Version:
-  Index: 19
+  Index: 25

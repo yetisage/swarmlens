@@ -3,7 +3,7 @@
   "ServerVersion": "29.9.2",
   "Swarm": {
     "Cluster": {
-      "ID": "4bqq56ig6jjdhnlf9n7b0licz",
+      "ID": "yv844iqwwxm709dbqrnt2qdq0",
       "Spec": {
         "Name": "default"
       }
@@ -12,7 +12,7 @@
     "LocalNodeState": "active",
     "Managers": 1,
     "NodeAddr": "127.0.0.1",
-    "NodeID": "okf0nzz6onffdvoim55yqcrhr",
+    "NodeID": "qs531opjwnjwvvp41wysh44rv",
     "Nodes": 1
   }
 }

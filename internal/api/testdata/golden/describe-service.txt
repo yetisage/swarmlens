@@ -1,5 +1,5 @@
 Name:             shop_api
-ID:               vkjc6op8n20dyl0dtuyxf85hd
+ID:               kzmfj1c2xci3hvm8bkm6ej8ty
 Stack:            shop
 Mode:             replicated
 Replicas:         2 running, 2 desired
@@ -7,8 +7,8 @@ Image:            hello:1
 Ports:            *:8080->80/tcp
 Labels:           com.docker.stack.image=hello:1
                   com.docker.stack.namespace=shop
-Created:          2026-11-09 14:25:27 UTC (34m ago)
-Updated:          2026-11-09 14:25:27 UTC (34m ago)
+Created:          2026-11-09 16:11:41 UTC (18m ago)
+Updated:          2026-11-09 16:11:41 UTC (18m ago)
 Rollback:         not available
 Container:
   Env:              ESC=pwn
@@ -19,5 +19,5 @@ Container:
 Networks:         shop_back (aliases api)
 Endpoint Mode:    vip
 Tasks:
-  shop_api.2             running    vm             34m
-  shop_api.1             running    vm             34m
+  shop_api.2             running    vm             18m
+  shop_api.1             running    vm             18m

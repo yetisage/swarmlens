@@ -5,43 +5,43 @@
   },
   "ConfigOnly": false,
   "Containers": {
-    "66863b4cdc01d6071ac84829bebba9fe82926ae12918ba1b50e329162d414ac2": {
-      "EndpointID": "ee27deda3ab01b0b206f69263db0d35b1e823d0273bfbc3b5d962c70b07c0eac",
-      "IPv4Address": "10.0.1.3/24",
+    "70dc4123fc42480999cb7e5c9e960b885441650c64ec1a502b61ac304e934080": {
+      "EndpointID": "4cfcbdaede794bc96a58e0ea87a20a158807a4aa343a0f1c5a0e4b342e671d74",
+      "IPv4Address": "10.0.2.4/24",
       "IPv6Address": "",
-      "MacAddress": "02:42:0a:00:01:03",
-      "Name": "shop_api.1.srmnarz81809ylrvax20qsegy"
+      "MacAddress": "02:42:0a:00:02:04",
+      "Name": "shop_api.2.bumfnei4y7f9a52da4hsvdjfd"
     },
-    "f5241955ce33245132eaaaf634f61448b59d06c77be54e58b26df7cfebfe7723": {
-      "EndpointID": "b246f8cb69c981e006ea69a903c787a6e0bc37b40044379fed349ffd84f76908",
-      "IPv4Address": "10.0.1.4/24",
+    "d46532501b25471f614d753c49e95da94788a74ffc1d2d59e5e6cac9a48c6230": {
+      "EndpointID": "87f4c5783f360602300415ad0f24ae3074664d19d27d45d321637b95d03208ad",
+      "IPv4Address": "10.0.2.3/24",
       "IPv6Address": "",
-      "MacAddress": "02:42:0a:00:01:04",
-      "Name": "shop_api.2.g3i01cu8gkw4mkhk3m0xhcapu"
+      "MacAddress": "02:42:0a:00:02:03",
+      "Name": "shop_api.1.nl1lftk59oillnk3pzo2pwpsr"
     },
     "lb-shop_back": {
-      "EndpointID": "c783810354e9d3dae68eee8b691607d297a69135a436ee579b472bced9839488",
-      "IPv4Address": "10.0.1.5/24",
+      "EndpointID": "6577ee0fc868b4e9cf4d1e2894c8d2b23531aef742af234201143729bf195953",
+      "IPv4Address": "10.0.2.5/24",
       "IPv6Address": "",
-      "MacAddress": "02:42:0a:00:01:05",
+      "MacAddress": "02:42:0a:00:02:05",
       "Name": "shop_back-endpoint"
     }
   },
-  "Created": "2026-11-09T14:25:27.627654192Z",
+  "Created": "2026-11-09T16:11:42.053887729Z",
   "Driver": "overlay",
   "EnableIPv4": true,
   "EnableIPv6": false,
   "IPAM": {
     "Config": [
       {
-        "Gateway": "10.0.1.1",
-        "Subnet": "10.0.1.0/24"
+        "Gateway": "10.0.2.1",
+        "Subnet": "10.0.2.0/24"
       }
     ],
     "Driver": "default",
     "Options": null
   },
-  "Id": "qdvzpywjn24d3kejbx821bzzp",
+  "Id": "nay8fitdso9ruzyspfi2t4c5a",
   "Ingress": false,
   "Internal": false,
   "Labels": {
@@ -49,13 +49,23 @@
   },
   "Name": "shop_back",
   "Options": {
-    "com.docker.network.driver.overlay.vxlanid_list": "4097"
+    "com.docker.network.driver.overlay.vxlanid_list": "4098"
   },
   "Peers": [
     {
       "IP": "127.0.0.1",
-      "Name": "3dd4607ffe35"
+      "Name": "310c7aa46274"
     }
   ],
-  "Scope": "swarm"
+  "Scope": "swarm",
+  "Status": {
+    "IPAM": {
+      "Subnets": {
+        "10.0.2.0/24": {
+          "DynamicIPsAvailable": 249,
+          "IPsInUse": 7
+        }
+      }
+    }
+  }
 }

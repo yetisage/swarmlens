@@ -1,12 +1,12 @@
 Name:             broken.1
-ID:               cv6hnf2zobka9r9mhrds94c6b
+ID:               oduuqd5dljm8ftogxkfudnca7
 Service:          broken
 Node:             vm
 Slot:             1
 Image:            no-such-registry.invalid/ghost:1
 Desired State:    shutdown
-State:            rejected (since 34m ago)
+State:            rejected (since 18m ago)
 Message:          preparing
 Error:            Get "https://no-such-registry.invalid/v2/": Forbidden
-Created:          2026-11-09 14:25:28 UTC (34m ago)
-Updated:          2026-11-09 14:25:29 UTC (34m ago)
+Created:          2026-11-09 16:11:42 UTC (18m ago)
+Updated:          2026-11-09 16:11:43 UTC (18m ago)
