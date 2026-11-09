@@ -3,22 +3,31 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"runtime/debug"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/yetisage/swarmlens/internal/api"
 	"github.com/yetisage/swarmlens/internal/config"
 	"github.com/yetisage/swarmlens/internal/demo"
+	"github.com/yetisage/swarmlens/internal/selfcheck"
 	"github.com/yetisage/swarmlens/internal/ui"
 )
 
 // version is set at build time via -ldflags "-X main.version=…".
 var version = "dev"
+
+// How long the self-test commands listen to the event stream; tests shorten
+// them. Zero means the default of the command.
+var (
+	debugEventsWindow = 30 * time.Second
+	smokeEventWindow  time.Duration
+)
 
 const usageText = `swarmlens — a k9s-style TUI for Docker Swarm
 
@@ -29,7 +38,8 @@ flags:
   -n, --stack NAME    start in a stack (like k9s' namespace)
       --context NAME  docker context to use (default: the current one)
   -r, --refresh SECS  refresh rate in seconds (default 2)
-      --readonly      disable every command that changes the swarm
+      --readonly      disable every command that changes the swarm or what runs
+                      in it (this includes shells in containers)
       --headless      hide the header
       --logoless      hide the logo
       --crumbsless    hide the breadcrumbs
@@ -40,64 +50,81 @@ flags:
       --height N      height for --render (default 40)
       --smoke         run a read-only self-test against the daemon and exit
       --smoke-mutate  also create, scale and remove a throwaway service
+      --smoke-image I image of that service (default registry:2)
       --debug-events  stream raw /events and exit
       --version       print the version and exit
 
 environment:
   DOCKER_HOST, DOCKER_CONTEXT, DOCKER_CONFIG   as for the docker CLI (tcp://,
-                      unix://, ssh:// and TLS endpoints; docker contexts)
+                      unix://, ssh:// and TLS endpoints; docker contexts).
+                      ssh:// runs the OpenSSH client, which cannot ask
+                      questions here: use ssh-agent and trust the host once
   SWARMLENS_CONFIG_DIR  where config.yaml, aliases.yaml and plugins.yaml live
                       (default ~/.config/swarmlens)
 
 keys:  : command · / filter · ? help · enter drill down · esc back · ctrl-c quit
 `
 
-func main() {
-	var (
-		command, stack, ctxName string
-		refresh                 string
-		readonly, headless      bool
-		logoless, crumbsless    bool
-		noIcons, demoMode       bool
-		render, smoke, mutate   bool
-		debugEvents, showVer    bool
-		width, height           int
-	)
-	flag.StringVar(&command, "c", "", "")
-	flag.StringVar(&command, "command", "", "")
-	flag.StringVar(&stack, "n", "", "")
-	flag.StringVar(&stack, "stack", "", "")
-	flag.StringVar(&ctxName, "context", "", "")
-	flag.StringVar(&refresh, "r", "", "")
-	flag.StringVar(&refresh, "refresh", "", "")
-	flag.BoolVar(&readonly, "readonly", false, "")
-	flag.BoolVar(&headless, "headless", false, "")
-	flag.BoolVar(&logoless, "logoless", false, "")
-	flag.BoolVar(&crumbsless, "crumbsless", false, "")
-	flag.BoolVar(&noIcons, "no-icons", false, "")
-	flag.BoolVar(&demoMode, "demo", false, "")
-	flag.BoolVar(&render, "render", false, "")
-	flag.IntVar(&width, "width", 140, "")
-	flag.IntVar(&height, "height", 40, "")
-	flag.BoolVar(&smoke, "smoke", false, "")
-	flag.BoolVar(&mutate, "smoke-mutate", false, "")
-	flag.BoolVar(&debugEvents, "debug-events", false, "")
-	flag.BoolVar(&showVer, "version", false, "")
-	flag.Usage = func() { fmt.Fprint(os.Stderr, usageText) }
-	flag.Parse()
+func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
 
-	if showVer {
-		fmt.Printf("swarmlens %s\n", versionString())
-		return
+// run is main with its inputs and outputs spelled out, and returns the exit
+// status: 0 for success, 1 for a failure, 2 for a mistake on the command line.
+func run(args []string, stdout, stderr io.Writer) int {
+	var (
+		command, stack, ctxName, refresh, smokeImage string
+		readonly, headless, logoless, crumbsless     bool
+		noIcons, demoMode, render                    bool
+		smoke, mutate, debugEvents, showVersion      bool
+		width, height                                int
+	)
+	fs := flag.NewFlagSet("swarmlens", flag.ContinueOnError)
+	fs.SetOutput(io.Discard) // errors are reported below, with the usage
+	fs.StringVar(&command, "c", "", "")
+	fs.StringVar(&command, "command", "", "")
+	fs.StringVar(&stack, "n", "", "")
+	fs.StringVar(&stack, "stack", "", "")
+	fs.StringVar(&ctxName, "context", "", "")
+	fs.StringVar(&refresh, "r", "", "")
+	fs.StringVar(&refresh, "refresh", "", "")
+	fs.BoolVar(&readonly, "readonly", false, "")
+	fs.BoolVar(&headless, "headless", false, "")
+	fs.BoolVar(&logoless, "logoless", false, "")
+	fs.BoolVar(&crumbsless, "crumbsless", false, "")
+	fs.BoolVar(&noIcons, "no-icons", false, "")
+	fs.BoolVar(&demoMode, "demo", false, "")
+	fs.BoolVar(&render, "render", false, "")
+	fs.IntVar(&width, "width", 140, "")
+	fs.IntVar(&height, "height", 40, "")
+	fs.BoolVar(&smoke, "smoke", false, "")
+	fs.BoolVar(&mutate, "smoke-mutate", false, "")
+	fs.StringVar(&smokeImage, "smoke-image", "registry:2", "")
+	fs.BoolVar(&debugEvents, "debug-events", false, "")
+	fs.BoolVar(&showVersion, "version", false, "")
+
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			fmt.Fprint(stdout, usageText)
+			return 0
+		}
+		fmt.Fprintf(stderr, "swarmlens: %v\n\n%s", err, usageText)
+		return 2
+	}
+	if fs.NArg() > 0 {
+		fmt.Fprintf(stderr, "swarmlens: unexpected argument %q\n\n%s", fs.Arg(0), usageText)
+		return 2
+	}
+	if showVersion {
+		fmt.Fprintf(stdout, "swarmlens %s\n", versionString())
+		return 0
 	}
 
 	cfg, err := config.Load(config.Dir())
 	if err != nil {
-		fatal(fmt.Errorf("config: %w", err))
+		return fail(stderr, fmt.Errorf("config: %w", err))
 	}
 	refreshEvery, err := parseRefresh(refresh)
 	if err != nil {
-		fatal(err)
+		return fail(stderr, err)
 	}
 
 	var (
@@ -111,18 +138,22 @@ func main() {
 	} else {
 		a, err := api.Connect(api.ConnectOptions{Context: ctxName})
 		if err != nil {
-			fatal(err)
+			return fail(stderr, err)
 		}
 		be = a
 		connect = func(name string) (api.Backend, error) { return api.Connect(api.ConnectOptions{Context: name}) }
 	}
 
 	ctx := context.Background()
-	switch {
-	case debugEvents:
-		os.Exit(debugEventsRun(ctx, be))
-	case smoke || mutate:
-		os.Exit(smokeRun(ctx, be, mutate))
+	if debugEvents || smoke || mutate {
+		defer func() { _ = be.Close() }()
+		if readonly || cfg.ReadOnly {
+			be = api.ReadOnly(be) // the self-test obeys --readonly too: it cannot create anything
+		}
+		if debugEvents {
+			return selfcheck.DebugEvents(ctx, stdout, be, debugEventsWindow)
+		}
+		return selfcheck.Smoke(ctx, stdout, be, selfcheck.Options{Mutate: mutate, Image: smokeImage, EventWindow: smokeEventWindow})
 	}
 
 	opt := ui.Options{
@@ -131,17 +162,18 @@ func main() {
 		Logoless: logoless, Crumbsless: crumbsless, NoIcons: noIcons, Refresh: refreshEvery,
 	}
 	if render {
-		fmt.Println(ui.Render(opt, width, height))
-		return
+		fmt.Fprintln(stdout, ui.Render(opt, width, height))
+		return 0
 	}
 	if err := ui.Run(opt); err != nil {
-		fatal(err)
+		return fail(stderr, err)
 	}
+	return 0
 }
 
-func fatal(err error) {
-	fmt.Fprintf(os.Stderr, "swarmlens: %v\n", err)
-	os.Exit(1)
+func fail(stderr io.Writer, err error) int {
+	fmt.Fprintf(stderr, "swarmlens: %v\n", err)
+	return 1
 }
 
 // parseRefresh accepts "2", "0.5" (seconds) or a Go duration like "500ms".
@@ -166,126 +198,4 @@ func versionString() string {
 		}
 	}
 	return v
-}
-
-// debugEventsRun streams raw events, useful for diagnosing the engine.
-func debugEventsRun(ctx context.Context, be api.Backend) int {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-	fmt.Println("streaming /events for 30s (ctrl+c to stop)…")
-	count := 0
-	_ = be.Events(ctx, func(e api.Event) {
-		count++
-		fmt.Printf("  %-10s %-16s %s\n", e.Type, e.Action, orDash(e.Name))
-	})
-	fmt.Printf("stream ended: %d events\n", count)
-	return 0
-}
-
-// smokeRun is a self-test against the daemon. It only reads unless mutate
-// is set, in which case it also creates, scales and removes a throwaway
-// service (which needs a real daemon).
-func smokeRun(ctx context.Context, be api.Backend, mutate bool) int {
-	failures := 0
-	check := func(name string, err error) {
-		if err != nil {
-			failures++
-			fmt.Printf("  ✗ %-22s %v\n", name, err)
-			return
-		}
-		fmt.Printf("  ✓ %s\n", name)
-	}
-
-	sum, err := be.Summary(ctx)
-	if err != nil {
-		fmt.Printf("FAIL: %v\n", err)
-		return 1
-	}
-	fmt.Printf("context %s (%s)\nswarm: %s role=%s cluster=%s nodes=%d/%d managers=%d engine=%s\n",
-		sum.Context, sum.Endpoint, sum.SwarmState, orDash(sum.Role), orDash(sum.Cluster), sum.NodesReady, sum.Nodes, sum.Managers, orDash(sum.ServerVersion))
-	if !sum.InSwarm() {
-		fmt.Println("\nThis daemon is not a swarm manager — nothing further to check.")
-		fmt.Println("Start a swarm with: docker swarm init --advertise-addr <ip>")
-		return 0
-	}
-
-	fmt.Println("\nAPI checks:")
-	svcs, err := be.Services(ctx)
-	check("services", err)
-	for _, s := range svcs {
-		fmt.Printf("      - %-24s %-12s %d/%d  %s\n", s.Name, s.Mode, s.Running, s.Desired, s.Image)
-	}
-	nodes, err := be.Nodes(ctx)
-	check("nodes", err)
-	for _, n := range nodes {
-		fmt.Printf("      - %-18s %-8s %-8s %-8s %s\n", n.Hostname, n.Role, n.Availability, n.Status, n.Engine)
-	}
-	tasks, err := be.Tasks(ctx, api.TaskQuery{})
-	check("tasks", err)
-	_, err = be.Stacks(ctx)
-	check("stacks", err)
-	_, err = be.Networks(ctx)
-	check("networks", err)
-	_, err = be.Volumes(ctx)
-	check("volumes", err)
-	_, err = be.Secrets(ctx)
-	check("secrets", err)
-	_, err = be.Configs(ctx)
-	check("configs", err)
-
-	if len(svcs) > 0 {
-		_, err = be.Describe(ctx, api.KindService, svcs[0].ID)
-		check("describe "+svcs[0].Name, err)
-		_, err = be.YAML(ctx, api.KindService, svcs[0].ID)
-		check("yaml "+svcs[0].Name, err)
-		var n int
-		err = be.Logs(ctx, api.LogTarget{Kind: api.KindService, ID: svcs[0].ID, Name: svcs[0].Name}, api.LogOptions{Tail: 5}, func(b []api.LogLine) { n += len(b) })
-		check(fmt.Sprintf("logs %s (%d lines)", svcs[0].Name, n), err)
-	}
-	_ = tasks
-
-	if mutate {
-		a, ok := be.(*api.API)
-		if !ok {
-			fmt.Println("\n--smoke-mutate needs a real daemon; skipped")
-		} else {
-			fmt.Println("\nmutating checks (--smoke-mutate):")
-			name := fmt.Sprintf("swarmlens-smoke-%d", time.Now().Unix()%100000)
-			if err := a.CreateService(ctx, name, "registry:2", 1); err != nil {
-				check("create "+name, err)
-			} else {
-				check("create "+name, nil)
-				defer func() { check("remove "+name, a.Remove(ctx, api.KindService, name)) }()
-				check("scale to 2", a.ScaleService(ctx, name, 2))
-				check("restart", a.RestartService(ctx, name))
-			}
-		}
-	}
-
-	if sum.Role == "manager" {
-		fmt.Println("\nevent stream (5s, expecting swarm events):")
-		evCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		events := 0
-		_ = be.Events(evCtx, func(e api.Event) {
-			events++
-			fmt.Printf("      event: %-9s %-10s %s\n", e.Type, e.Action, orDash(e.Name))
-		})
-		fmt.Printf("      ✓ stream closed cleanly after %d events\n", events)
-	}
-
-	fmt.Println()
-	if failures > 0 {
-		fmt.Printf("FAILED: %d check(s) reported errors\n", failures)
-		return 1
-	}
-	fmt.Println("PASSED")
-	return 0
-}
-
-func orDash(s string) string {
-	if strings.TrimSpace(s) == "" {
-		return "-"
-	}
-	return s
 }

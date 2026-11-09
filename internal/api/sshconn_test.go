@@ -100,7 +100,7 @@ func dialFake(t *testing.T) *cmdConn {
 		t.Fatal(err)
 	}
 	c := conn.(*cmdConn)
-	t.Cleanup(func() { c.Close() })
+	t.Cleanup(func() { _ = c.Close() })
 	return c
 }
 
@@ -123,7 +123,7 @@ func TestCmdConnCarriesBytesBothWays(t *testing.T) {
 	if _, err := io.ReadFull(c, buf); err != nil || string(buf) != "hello\n" {
 		t.Fatalf("read %q, %v", buf, err)
 	}
-	c.Close()
+	_ = c.Close()
 	if !exited(c, 5*time.Second) {
 		t.Error("the process must end when the connection is closed")
 	}
@@ -174,7 +174,7 @@ func TestSSHHints(t *testing.T) {
 func TestCmdConnCleanExitIsAPlainEOF(t *testing.T) {
 	fakeSSH(t, "exit 0")
 	c := dialFake(t)
-	if _, err := c.Read(make([]byte, 1)); err != io.EOF {
+	if _, err := c.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
 		t.Errorf("err = %v, want io.EOF", err)
 	}
 }
@@ -182,11 +182,11 @@ func TestCmdConnCleanExitIsAPlainEOF(t *testing.T) {
 func TestCmdConnCloseKillsAProcessThatIgnoresIt(t *testing.T) {
 	fakeSSH(t, "exec sleep 60")
 	c := dialFake(t)
-	c.Close()
+	_ = c.Close()
 	if !exited(c, 6*time.Second) {
 		t.Fatal("a process that outlives Close must be killed")
 	}
-	c.Close() // closing twice is fine
+	_ = c.Close() // closing twice is fine
 }
 
 func TestSSHClientMissing(t *testing.T) {
@@ -266,7 +266,7 @@ exec "$SWARMLENS_TEST_BIN" -test.run='^TestHelperSSHBridge$'`)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer a.Close()
+	defer func() { _ = a.Close() }()
 	if a.Endpoint() != "ssh://swarm.example.com:2222" {
 		t.Errorf("endpoint shown as %q: the user name stays out of the header", a.Endpoint())
 	}
@@ -299,7 +299,7 @@ func TestSSHFailureReachesTheCaller(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer a.Close()
+	defer func() { _ = a.Close() }()
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	_, err = a.Summary(ctx)

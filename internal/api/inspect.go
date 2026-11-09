@@ -39,7 +39,7 @@ func (d *doc) kv(indent int, key string, vals ...string) {
 	d.flushHead(indent)
 	pad := strings.Repeat(" ", indent)
 	d.b.WriteString(pad)
-	d.b.WriteString(fmt.Sprintf("%-*s", descKeyWidth, key+":"))
+	fmt.Fprintf(&d.b, "%-*s", descKeyWidth, key+":")
 	d.b.WriteString(vs[0])
 	d.b.WriteByte('\n')
 	for _, v := range vs[1:] {

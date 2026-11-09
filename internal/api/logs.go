@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -53,7 +54,7 @@ func (a *API) Logs(ctx context.Context, t LogTarget, o LogOptions, emit func([]L
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
+	defer func() { _ = rc.Close() }()
 
 	res := &taskResolver{a: a, ctx: ctx, serviceID: t.ID, names: map[string]taskLabel{}}
 	if t.Kind == KindTask {
@@ -221,7 +222,7 @@ func readLogLines(r io.Reader, onLine func(stderr bool, line string)) error {
 	br := bufio.NewReaderSize(r, 64*1024)
 	head, err := br.Peek(8)
 	if err != nil && len(head) == 0 {
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			return nil
 		}
 		return err
@@ -235,7 +236,7 @@ func readLogLines(r io.Reader, onLine func(stderr bool, line string)) error {
 			split.write(chunk[:n], emit)
 			if err != nil {
 				split.flush(emit)
-				if err == io.EOF {
+				if errors.Is(err, io.EOF) {
 					return nil
 				}
 				return err
@@ -251,7 +252,7 @@ func readLogLines(r io.Reader, onLine func(stderr bool, line string)) error {
 	}
 	end := func(err error) error {
 		flushAll()
-		if err == io.EOF || err == io.ErrUnexpectedEOF {
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
 			return nil
 		}
 		return err

@@ -32,13 +32,6 @@ func ratioCell(running, desired int) (string, float64) {
 	return fmt.Sprintf("%d/%d", running, desired), f
 }
 
-func joinOr(ss []string, sep, empty string) string {
-	if len(ss) == 0 {
-		return empty
-	}
-	return strings.Join(ss, sep)
-}
-
 func labelCount(m map[string]string) string {
 	n := 0
 	for k := range m {

@@ -152,8 +152,7 @@ func startCmdConn(host, name string, args ...string) (*cmdConn, error) {
 	}
 	outR, outW, err := os.Pipe()
 	if err != nil {
-		inR.Close()
-		inW.Close()
+		closeAll(inR, inW)
 		return nil, err
 	}
 	c := &cmdConn{host: host, stdin: inW, stdout: outR, stderr: &tailBuffer{max: 4096}, done: make(chan struct{})}
@@ -163,11 +162,9 @@ func startCmdConn(host, name string, args ...string) (*cmdConn, error) {
 	detach(c.cmd)
 	err = c.cmd.Start()
 	// the process has its ends of the pipes now; ours are the other ones
-	inR.Close()
-	outW.Close()
+	closeAll(inR, outW)
 	if err != nil {
-		inW.Close()
-		outR.Close()
+		closeAll(inW, outR)
 		return nil, err
 	}
 	go func() {
@@ -175,6 +172,12 @@ func startCmdConn(host, name string, args ...string) (*cmdConn, error) {
 		close(c.done)
 	}()
 	return c, nil
+}
+
+func closeAll(files ...*os.File) {
+	for _, f := range files {
+		_ = f.Close()
+	}
 }
 
 // explain turns the end of a pipe into what the user needs to know: if the

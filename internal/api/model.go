@@ -323,6 +323,13 @@ type Switcher interface {
 	Contexts() ([]ContextInfo, error)
 }
 
+// ServiceCreator is implemented by backends that can create a throwaway
+// service. swarmlens deploys nothing; this exists for the --smoke-mutate
+// self-test, which needs something to scale, restart and remove.
+type ServiceCreator interface {
+	CreateService(ctx context.Context, name, image string, replicas int) error
+}
+
 // Simulated is implemented by backends that are not a real daemon, so the
 // UI can refuse things that need one (shells into containers).
 type Simulated interface{ Simulated() bool }

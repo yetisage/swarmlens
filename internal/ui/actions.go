@@ -267,12 +267,14 @@ func (a *app) editService(s api.Service) tea.Cmd {
 		if err != nil {
 			return editMsg{svc: s, err: err}
 		}
+		// the spec may hold secrets: CreateTemp makes the file private (0600)
 		f, err := os.CreateTemp("", "swarmlens-"+sanitize(s.Name)+"-*.yaml")
 		if err != nil {
 			return editMsg{svc: s, err: err}
 		}
-		defer f.Close()
-		if _, err := f.WriteString(y); err != nil {
+		_, werr := f.WriteString(y)
+		if err := errors.Join(werr, f.Close()); err != nil {
+			_ = os.Remove(f.Name())
 			return editMsg{svc: s, err: err}
 		}
 		return editMsg{svc: s, path: f.Name(), orig: y, version: version}
@@ -299,7 +301,7 @@ func (a *app) onEdit(m editMsg) tea.Cmd {
 }
 
 func (a *app) onEditDone(m editDoneMsg) tea.Cmd {
-	defer os.Remove(m.path)
+	defer func() { _ = os.Remove(m.path) }()
 	if m.err != nil {
 		a.flash(flashErr, "Editor failed: "+m.err.Error())
 		return nil

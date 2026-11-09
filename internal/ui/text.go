@@ -47,7 +47,7 @@ func ansiSegs(s string, base style) []seg {
 			i = j + 1
 		case ']': // OSC, ended by BEL or ST
 			j := i + 2
-			for j < len(s) && s[j] != 0x07 && !(s[j] == 0x1b && j+1 < len(s) && s[j+1] == '\\') {
+			for j < len(s) && s[j] != 0x07 && (s[j] != 0x1b || j+1 >= len(s) || s[j+1] != '\\') {
 				j++
 			}
 			switch {

@@ -60,6 +60,8 @@ var (
 	_ api.Backend   = (*Backend)(nil)
 	_ api.Switcher  = (*Backend)(nil)
 	_ api.Simulated = (*Backend)(nil)
+
+	_ api.ServiceCreator = (*Backend)(nil)
 )
 
 // New returns a live demo: the clock runs, events trickle in.
@@ -89,6 +91,31 @@ func (b *Backend) Simulated() bool { return true }
 
 // Close implements api.Backend; there is nothing to release.
 func (b *Backend) Close() error { return nil }
+
+// CreateService implements api.ServiceCreator: a replicated service whose
+// tasks start up, which is all the --smoke-mutate self-test needs.
+func (b *Backend) CreateService(ctx context.Context, name, image string, replicas int) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.svcByID(name) != nil {
+		return fmt.Errorf("service %q already exists", name)
+	}
+	now := b.clock()
+	s := &service{
+		Service: api.Service{
+			ID: mkID("service", name), Name: name, Mode: "replicated", Desired: max(replicas, 0), Image: image,
+			Labels:  map[string]string{"swarmlens.managed": "true"},
+			Created: now, Updated: now,
+		},
+		logKind: "plain",
+	}
+	b.services = append(b.services, s)
+	for slot := 1; slot <= s.Desired; slot++ {
+		b.spawnTask(s, slot, b.pick(s, slot))
+	}
+	b.publish(api.Event{Type: "service", Action: "create", ID: s.ID, Name: s.Name})
+	return nil
+}
 
 func mkID(kind, name string) string {
 	sum := sha256.Sum256([]byte(kind + "/" + name))

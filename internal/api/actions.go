@@ -211,9 +211,8 @@ func (a *API) UpdateServiceSpec(ctx context.Context, id string, version uint64, 
 	return err
 }
 
-// CreateService creates a replicated service. It is not part of Backend:
-// swarmlens does not deploy anything, this exists for the --smoke-mutate
-// self-test, which needs a throwaway service to scale and remove.
+// CreateService implements ServiceCreator: a replicated service, for the
+// --smoke-mutate self-test.
 func (a *API) CreateService(ctx context.Context, name, image string, replicas int) error {
 	n := uint64(replicas)
 	spec := swarm.ServiceSpec{

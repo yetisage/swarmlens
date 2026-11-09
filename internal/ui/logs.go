@@ -311,13 +311,13 @@ func (v *logView) plainLine(l api.LogLine) string {
 }
 
 func (v *logView) save() {
-	dir := stateDir("logs", sanitize(v.a.be.ContextName()))
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dir, err := stateDir("logs", sanitize(v.a.be.ContextName()))
+	if err != nil {
 		v.a.flash(flashErr, err.Error())
 		return
 	}
 	path := filepath.Join(dir, fmt.Sprintf("%s-%d.log", sanitize(v.target.Name), time.Now().Unix()))
-	if err := os.WriteFile(path, []byte(v.plainText()), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(v.plainText()), 0o600); err != nil {
 		v.a.flash(flashErr, err.Error())
 		return
 	}

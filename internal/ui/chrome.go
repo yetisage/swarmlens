@@ -59,7 +59,7 @@ func (a *app) infoRows() []infoRow {
 		)
 	}
 
-	swarm := "n/a"
+	var swarm string
 	switch {
 	case s.SwarmState != "active":
 		swarm = "not in a swarm (" + s.SwarmState + ")"
