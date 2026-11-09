@@ -3,7 +3,7 @@ package ui
 import (
 	"context"
 
-	"swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/api"
 )
 
 // recorder wraps a backend, remembers the mutations asked of it and can make

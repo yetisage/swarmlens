@@ -14,7 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/muesli/termenv"
 
-	"swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/api"
 )
 
 // ---- shared bindings ----

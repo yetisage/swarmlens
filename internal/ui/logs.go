@@ -12,7 +12,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/api"
 )
 
 // logView follows the logs of a service (all its tasks, each line tagged

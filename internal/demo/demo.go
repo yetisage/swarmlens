@@ -19,7 +19,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/api"
 )
 
 // Backend is the in-memory swarm.

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/api"
 )
 
 var now = time.Date(2026, 11, 8, 15, 0, 0, 0, time.UTC)

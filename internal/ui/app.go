@@ -16,8 +16,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
 
-	"swarmlens/internal/api"
-	"swarmlens/internal/config"
+	"github.com/yetisage/swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/config"
 )
 
 // Options configures the UI.

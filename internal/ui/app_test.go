@@ -11,8 +11,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/muesli/termenv"
 
-	"swarmlens/internal/api"
-	"swarmlens/internal/config"
+	"github.com/yetisage/swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/config"
 )
 
 func TestInitialViewIsServicesWithHeader(t *testing.T) {

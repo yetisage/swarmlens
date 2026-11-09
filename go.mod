@@ -1,4 +1,4 @@
-module swarmlens
+module github.com/yetisage/swarmlens
 
 go 1.27.1
 

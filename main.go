@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
-	"swarmlens/internal/api"
-	"swarmlens/internal/config"
-	"swarmlens/internal/demo"
-	"swarmlens/internal/ui"
+	"github.com/yetisage/swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/config"
+	"github.com/yetisage/swarmlens/internal/demo"
+	"github.com/yetisage/swarmlens/internal/ui"
 )
 
 // version is set at build time via -ldflags "-X main.version=…".

@@ -8,7 +8,7 @@ import (
 	"sort"
 	"time"
 
-	"swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/api"
 )
 
 // Logs implements api.Backend with generated, service-flavoured output: a

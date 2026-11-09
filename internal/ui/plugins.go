@@ -8,7 +8,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"swarmlens/internal/config"
+	"github.com/yetisage/swarmlens/internal/config"
 )
 
 // pluginActions are the user's plugins that apply to a table, in k9s'

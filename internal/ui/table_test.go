@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"swarmlens/internal/api"
+	"github.com/yetisage/swarmlens/internal/api"
 )
 
 func svcRow(id, name, stack string, running, desired int, age string) *row {
