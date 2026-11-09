@@ -71,15 +71,15 @@ func applySGR(cur, base style, params string) style {
 		return base
 	}
 	codes := strings.Split(params, ";")
-	num := func(i int) int {
-		if i >= len(codes) {
-			return 0
-		}
-		n, _ := strconv.Atoi(codes[i])
-		return n
-	}
 	for i := 0; i < len(codes); i++ {
-		n := num(i)
+		if strings.Contains(codes[i], ":") {
+			cur = applyColonSGR(cur, base, codes[i])
+			continue
+		}
+		n, ok := parseParam(codes[i])
+		if !ok {
+			continue // not a number: ignore it rather than guess
+		}
 		switch {
 		case n == 0:
 			cur = base
@@ -114,15 +114,9 @@ func applySGR(cur, base style, params string) style {
 		case n >= 100 && n <= 107:
 			cur.bg = palette(8 + n - 100)
 		case n == 38 || n == 48:
-			var col color
-			switch num(i + 1) {
-			case 5:
-				col = palette(num(i + 2))
-				i += 2
-			case 2:
-				col = color(num(i+2)<<16 | num(i+3)<<8 | num(i+4))
-				i += 4
-			default:
+			col, used, ok := extendedColor(codes[i+1:])
+			i += used
+			if !ok {
 				continue
 			}
 			if n == 38 {
@@ -133,6 +127,88 @@ func applySGR(cur, base style, params string) style {
 		}
 	}
 	return cur
+}
+
+// parseParam reads one SGR parameter. An empty one means 0, as in ECMA-48;
+// anything that is not a number is reported as such.
+func parseParam(s string) (int, bool) {
+	if s == "" {
+		return 0, true
+	}
+	n, err := strconv.Atoi(s)
+	return n, err == nil
+}
+
+// extendedColor reads what follows SGR 38 or 48 ("5;n" or "2;r;g;b") and says
+// how many parameters it used. Container output is untrusted: channel values
+// are clamped to what a terminal can show and an incomplete colour is skipped.
+func extendedColor(args []string) (c color, used int, ok bool) {
+	get := func(i int) (int, bool) {
+		if i >= len(args) {
+			return 0, false
+		}
+		return parseParam(args[i])
+	}
+	mode, ok := get(0)
+	if !ok {
+		return noColor, 0, false
+	}
+	switch mode {
+	case 5:
+		n, ok := get(1)
+		if !ok {
+			return noColor, min(len(args), 2), false
+		}
+		return palette(clampByte(n)), 2, true
+	case 2:
+		r, okR := get(1)
+		g, okG := get(2)
+		b, okB := get(3)
+		if !okR || !okG || !okB {
+			return noColor, min(len(args), 4), false
+		}
+		return trueColor(r, g, b), 4, true
+	}
+	return noColor, 0, false
+}
+
+// applyColonSGR handles the sub-parameter forms some programs emit:
+// 38:5:n, 38:2::r:g:b (with an optional colour space id) and 4:n.
+func applyColonSGR(cur, base style, code string) style {
+	sub := strings.Split(code, ":")
+	head, ok := parseParam(sub[0])
+	if !ok {
+		return cur
+	}
+	switch head {
+	case 38, 48:
+		args := sub[1:]
+		if len(args) >= 5 && args[0] == "2" { // drop the colour space id
+			args = append([]string{"2"}, args[2:]...)
+		}
+		col, _, ok := extendedColor(args)
+		if !ok {
+			return cur
+		}
+		if head == 38 {
+			cur.fg = col
+		} else {
+			cur.bg = col
+		}
+	case 4:
+		if len(sub) > 1 && sub[1] == "0" {
+			cur.attrs &^= attrUnderline
+		} else {
+			cur.attrs |= attrUnderline
+		}
+	}
+	return cur
+}
+
+func clampByte(n int) int { return max(0, min(n, 255)) }
+
+func trueColor(r, g, b int) color {
+	return color(clampByte(r)<<16 | clampByte(g)<<8 | clampByte(b))
 }
 
 // yamlSegs colours one line of YAML, or of a describe report, the way

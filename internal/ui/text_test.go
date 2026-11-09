@@ -4,6 +4,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/muesli/termenv"
 )
 
 func plain(ss []seg) string {
@@ -187,4 +189,140 @@ func TestExpandPluginVariables(t *testing.T) {
 	if got != "logs web.1 in shop on worker-1 (x)" {
 		t.Errorf("expand = %q", got)
 	}
+}
+
+// ---- container output is untrusted ----
+
+var sgrOnly = regexp.MustCompile(`^\x1b\[[0-9;]*m`)
+
+// renderLine pushes a log line through everything that stands between a
+// container's output and the terminal, and returns what would be written.
+func renderLine(in string) string {
+	th := stockTheme()
+	base := th.s(th.logs.fg)
+	segs := ansiSegs(in, base)
+	c := newCanvas(80, 6, th.base(), termenv.TrueColor)
+	p := c.painter()
+	p.segs(0, 0, highlight(segs, regexp.MustCompile("(?i)a|é|."), style{fg: cBlack, bg: th.table.cursorBg}))
+	for i, row := range wrapSegs(segs, 17) {
+		p.segs(0, 1+i%4, row)
+	}
+	p.segs(0, 5, cutSegs(segs, 3, 11))
+	p.text(0, 5, ellipsize(in, 25), base)
+	return c.String()
+}
+
+// onlyStyling fails the test if the output holds anything but SGR sequences.
+func onlyStyling(t *testing.T, in, out string) {
+	t.Helper()
+	for i := 0; i < len(out); i++ {
+		switch ch := out[i]; {
+		case ch == 0x1b:
+			if !sgrOnly.MatchString(out[i:]) {
+				t.Fatalf("a non-SGR escape reached the terminal for %q: %q", in, out[i:min(i+24, len(out))])
+			}
+		case ch == '\n':
+		case ch < 0x20 || ch == 0x7f:
+			t.Fatalf("control byte %#x reached the terminal for %q", ch, in)
+		}
+	}
+	if strings.ContainsAny(out, "\u0080\u0090\u009b\u009c\u009d\u009f") {
+		t.Fatalf("a C1 control reached the terminal for %q", in)
+	}
+}
+
+var hostileLines = []string{
+	// colours outside what a terminal can show: these used to panic the renderer
+	"\x1b[38;2;-5;0;0m negative red",
+	"\x1b[48;2;0;0;-9m negative blue background",
+	"\x1b[38;2;99999999;0;0m huge red",
+	"\x1b[38;2;99999999999999999999;0;0m not even an int",
+	"\x1b[38;2;256;256;256m just over",
+	"\x1b[38;5;99999m huge palette index",
+	"\x1b[38;5;-3m negative palette index",
+	"\x1b[38;2;1;2m truncated truecolour",
+	"\x1b[38;5m truncated palette",
+	"\x1b[38m \x1b[48m bare",
+	"\x1b[38:2::-5:0:0m colon form",
+	"\x1b[38:2:1:2:3m colon form without a colour space",
+	"\x1b[38:5:999m colon form index",
+	"\x1b[" + strings.Repeat("9;", 5000) + "m very long",
+	"\x1b[;;;m empty parameters",
+	"\x1b[abc;1m not numbers",
+	// sequences that are not styling must never get through
+	"\x1b]52;c;SGVsbG8=\x07 clipboard",
+	"\x1b]0;title\x07 retitle",
+	"\x1b[21t \x1b[6n \x1b[?1049h \x1b[2J \x1b[H",
+	"\x1bP+q544e\x1b\\ dcs",
+	"\x1b_Gf=100;AAAA\x1b\\ apc",
+	"\xc2\x9b31m c1 csi \xc2\x9d0;x\x07 c1 osc",
+	"a\rb\x08c\x7fd\x00e\x0bf\x0cg",
+	string(rune(0x202e)) + " rtl override " + string(rune(0x2066)) + " isolate",
+	// truncated escapes
+	"\x1b", "\x1b[", "\x1b]", "\x1b[31", "\x1b]0;never ends",
+	"\xff\xfe not utf-8 \xc3",
+}
+
+func TestHostileLogLinesNeverBreakTheRenderer(t *testing.T) {
+	for _, in := range hostileLines {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("rendering %q panicked: %v", in, r)
+				}
+			}()
+			onlyStyling(t, in, renderLine(in))
+		}()
+	}
+}
+
+func TestANSIColourParametersAreClamped(t *testing.T) {
+	base := style{fg: cWhite, bg: noColor}
+	cases := []struct {
+		in   string
+		want color
+	}{
+		{"\x1b[38;2;256;0;0mx", color(0xff0000)},
+		{"\x1b[38;2;-5;0;300mx", color(0x0000ff)},
+		{"\x1b[38;5;999mx", palette(255)},
+		{"\x1b[38;5;-3mx", palette(0)},
+		{"\x1b[38:2::1:2:3mx", color(0x010203)},
+		{"\x1b[38:2:1:2:3mx", color(0x010203)},
+		{"\x1b[38:5:208mx", palette(208)},
+	}
+	for _, c := range cases {
+		ss := ansiSegs(c.in, base)
+		if len(ss) != 1 || ss[0].st.fg != c.want {
+			t.Errorf("%q: got %+v, want fg %#x", c.in, ss, int(c.want))
+		}
+	}
+	// an incomplete colour is skipped, it must not leave a half-made one behind
+	if ss := ansiSegs("\x1b[38;2;1;2mx", base); len(ss) != 1 || ss[0].st.fg != base.fg {
+		t.Errorf("a truncated truecolour must be ignored, got %+v", ss)
+	}
+	// garbage parameters are ignored instead of resetting the style
+	if ss := ansiSegs("\x1b[31m\x1b[abcmx", base); len(ss) != 1 || ss[0].st.fg != palette(1) {
+		t.Errorf("an unparsable parameter must not reset the colour, got %+v", ss)
+	}
+	// an empty parameter is a 0, as in ECMA-48
+	if ss := ansiSegs("\x1b[31m\x1b[mx", base); len(ss) != 1 || ss[0].st != base {
+		t.Errorf("ESC[m must reset, got %+v", ss)
+	}
+}
+
+func TestANSIUnderlineSubParameter(t *testing.T) {
+	ss := ansiSegs("\x1b[4:3mcurly\x1b[4:0mplain", style{})
+	if len(ss) != 2 || ss[0].st.attrs&attrUnderline == 0 || ss[1].st.attrs&attrUnderline != 0 {
+		t.Errorf("segs = %+v", ss)
+	}
+}
+
+// FuzzANSIRender adds random inputs to the table above. Alone it does not
+// find the colour bug quickly, so the table is the guard and this is the net.
+func FuzzANSIRender(f *testing.F) {
+	for _, s := range hostileLines {
+		f.Add(s)
+	}
+	f.Add("\x1b[31mred\x1b[0m plain 日本語 \x1b[1;4mbold")
+	f.Fuzz(func(t *testing.T, in string) { onlyStyling(t, in, renderLine(in)) })
 }

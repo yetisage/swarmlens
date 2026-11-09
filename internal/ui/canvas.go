@@ -395,6 +395,11 @@ func (c *canvas) colorParam(col color, bg bool) string {
 		}
 		return "38;5;" + strconv.Itoa(n)
 	}
-	// termenv downgrades to the 256 or 16 colour palette as needed.
-	return c.profile.Color(fmt.Sprintf("#%06x", int(col))).Sequence(bg)
+	// termenv downgrades to the 256 or 16 colour palette as needed. It answers
+	// nil for a value it cannot parse, which must not take the UI down.
+	tc := c.profile.Color(fmt.Sprintf("#%06x", int(col)&0xffffff))
+	if tc == nil {
+		return ""
+	}
+	return tc.Sequence(bg)
 }
