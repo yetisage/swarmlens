@@ -60,6 +60,13 @@ light green and blue are rows that just changed or appeared.
 ## Install & run
 
 ```sh
+go install github.com/yetisage/swarmlens@latest     # needs Go 1.27.1 or newer
+```
+
+or take a binary from the [releases](https://github.com/yetisage/swarmlens/releases)
+(Linux, macOS, Windows and FreeBSD; amd64, arm64, armv7 and 386), or build it:
+
+```sh
 make build            # or: go build -o swarmlens .
 ./swarmlens           # the current docker context, like the docker CLI
 ./swarmlens --demo    # an in-memory swarm
@@ -73,20 +80,30 @@ make build            # or: go build -o swarmlens .
 | `-n, --stack NAME` | start in a stack |
 | `--context NAME` | docker context to use |
 | `-r, --refresh SECS` | refresh rate (default 2) |
-| `--readonly` | disable every command that changes the swarm |
+| `--readonly` | disable every command that changes the swarm or what runs in it, a shell into a task included; the backend refuses changes too, whatever asks |
 | `--headless`, `--logoless`, `--crumbsless`, `--no-icons` | hide parts of the chrome / emoji |
 | `--demo` | in-memory demo swarm |
 | `--render [--width N --height N]` | print one frame as plain text and exit |
-| `--smoke`, `--smoke-mutate` | self-test against the daemon (`--smoke-mutate` creates, scales and removes a throwaway service) |
+| `--smoke`, `--smoke-mutate` | self-test against the daemon (`--smoke-mutate` creates, scales and removes a throwaway service, `--smoke-image` says which image) |
 | `--debug-events` | stream the raw event feed |
 
 **Connection.** swarmlens resolves the daemon like the docker CLI does:
 `--context`, then `DOCKER_HOST`, then `DOCKER_CONTEXT`, then the current
 context of `~/.docker/config.json`, then the local socket. `tcp://`, `unix://`,
 `ssh://` and TLS (`DOCKER_TLS_VERIFY`/`DOCKER_CERT_PATH`, or the TLS material
-of a context) work. Point it at a **manager**; workers do not serve the swarm
-API and the app says so. `ssh://` endpoints use a built-in ssh client (agent
-and `~/.docker/id_*` keys) that does not verify host keys.
+of a context; the client certificate is optional) work. Point it at a
+**manager**; workers do not serve the swarm API and the app says so.
+
+`ssh://` endpoints are reached the way the docker CLI reaches them: swarmlens
+runs your **OpenSSH client** and `docker system dial-stdio` on the far end. So
+host keys are verified against `~/.ssh/known_hosts`, and `~/.ssh/config`
+(aliases, `ProxyJump`, `IdentityFile`, `ControlMaster`), agents and hardware
+keys all work. What it cannot do is ask you anything: swarmlens owns the
+terminal, so ssh runs with `BatchMode` and in a session of its own. Load your
+key into `ssh-agent` and connect with `ssh <host>` once to trust the host; if
+that is missing swarmlens shows ssh's own error and says what to do.
+`ControlMaster auto` and `ControlPersist` in your ssh config make it snappier,
+since every connection is a new ssh process.
 
 ## The `:` prompt
 
@@ -137,7 +154,7 @@ always right. The header menu lists the ones that matter right now.
 | view | keys |
 |---|---|
 | services | `enter` tasks · `d` describe · `y` YAML · `e` edit the spec in `$EDITOR` · `l` logs of all its tasks · `s` scale · `r` restart (rolling) · `b` rollback · `ctrl-d` delete |
-| tasks | `enter`/`l` logs · `d` · `y` · `s` shell (tasks on the node you are connected to) · `shift-j` jump to the service |
+| tasks | `enter`/`l` logs · `d` · `y` · `s` shell (tasks on the node you are connected to; not in `--readonly`) · `shift-j` jump to the service |
 | nodes | `enter` its tasks · `d` · `y` · `c` cordon (pause) · `u` uncordon · `r` drain · `p` promote · `shift-d` demote · `ctrl-d` remove |
 | stacks | `enter` its services · `d` · `y` · `ctrl-d` remove the stack |
 | networks, volumes, secrets, configs | `d` · `y` · `ctrl-d` (secret values are never fetched; config contents are shown) |
@@ -150,12 +167,18 @@ A service's logs are aggregated over its tasks, each line prefixed with the task
 coloured per task; container colours (ANSI) are kept.
 
 Destructive actions ask first, and the dialog starts on **Cancel**, so a stray
-`enter` deletes nothing. With marks set, an action applies to every marked row.
+`enter` deletes nothing. With marks set, an action applies to every marked row
+and asks once; it goes on after a failure and says what failed ("1 of 3
+failed: …") instead of stopping at the first error.
 
 ## Configuration
 
 Optional files in `~/.config/swarmlens/` (or `$SWARMLENS_CONFIG_DIR`). The
-formats are k9s'.
+formats are k9s'. A key that means nothing is an error that names the line and
+suggests the nearest real key (`readonly` → `readOnly`), because a typo that is
+silently ignored switches a safety setting off. The fields k9s has and
+swarmlens has no use for (`override`, `pipes`, `overwriteOutput`) are accepted
+in `plugins.yaml` and ignored, so a k9s plugins file loads.
 
 ```yaml
 # config.yaml
@@ -185,23 +208,31 @@ plugins:
 ```
 
 Plugin arguments can use `$NAME`, `$ID`, `$STACK`, `$CONTEXT`, `$ENDPOINT`,
-`$FILTER` and `$COL-<COLUMN>` (e.g. `$COL-IMAGE`). `background: true` detaches
-the command, `confirm: true` asks first, `dangerous: true` hides it in
-read-only mode.
+`$FILTER` and `$COL-<COLUMN>` (e.g. `$COL-IMAGE`), expanded in one pass.
+`background: true` detaches the command, `confirm: true` asks first,
+`dangerous: true` hides it in read-only mode. Plugins run what you wrote: if
+you hand a value to `sh -c`, remember that cells such as `$COL-ERROR` hold
+text the cluster produced.
+
+Tables and logs you save with `ctrl-s` go to `$XDG_STATE_HOME/swarmlens`
+(`~/.local/state/swarmlens`), readable by you alone.
 
 ## How it is built
 
 ```
-main.go                flags, config, wiring
+main.go                flags and wiring; run() returns the exit status
 internal/api/          the Docker Engine API as a typed Backend
-  model.go             domain types and the Backend interface
-  docker.go            connection (contexts, tcp, ssh, TLS), cluster summary
+  model.go             domain types; Backend = Reader + Streamer + Mutator + Close
+  readonly.go          ReadOnly(): a Backend that refuses every Mutator method
+  docker.go            connection (contexts, tcp, TLS), cluster summary
+  sshconn.go           ssh:// through the system ssh and `docker system dial-stdio`
   list.go inspect.go   listings · describe and YAML
   logs.go events.go    log framing and aggregation · the event stream
   actions.go           scale, restart, rollback, drain, remove, stack removal, spec edit
   contexts.go          reads the docker context store
 internal/demo/         an in-memory Backend that simulates a living swarm
 internal/config/       config.yaml, aliases.yaml, plugins.yaml
+internal/selfcheck/    --smoke and --debug-events, against any Backend
 internal/ui/           Bubble Tea program
   canvas.go            the cell grid every frame is drawn on
   app.go view.go       the model, the view stack, key routing
@@ -228,16 +259,25 @@ selection is tracked by id, so it survives refreshes that reorder rows.
 
 ```sh
 make check                     # vet + tests
-go test ./... -race
-SWARMLENS_LIVE=1 go test ./internal/api -run Live -v   # read-only, against your daemon
+make ci                        # what CI runs: gofmt, tidy, vet, golangci-lint,
+                               # race tests, 32-bit tests, cross-builds
+make live                      # read-only API tests against your daemon
 go test ./internal/ui -run Golden -update              # refresh the golden screens
+go test ./internal/api -run Recorded -update           # refresh the describe/YAML reports
 ```
 
 * `internal/ui/testdata/*.golden` are full screens of the demo swarm (frozen
   clock). They pin the layout; review their diff when one changes.
 * The API tests run against an in-process fake daemon, covering parsing, the
   patch semantics of scale/drain/rollback, stack removal order, log framing and
-  attribution, event filtering and reconnection.
+  attribution, event filtering and reconnection, TLS, and the ssh transport
+  (with a stand-in `ssh`).
+* `internal/api/testdata/docker-29.9.2` holds API responses recorded from a
+  real Docker 29.9.2 swarm; the describe and YAML reports of every kind are
+  golden files made from them (see the README there to record new ones).
+* CI also runs everything on a real swarm (`.github/workflows/ci.yml`), and the
+  suite on 32-bit and macOS. Tagging `vX.Y.Z` builds the releases
+  (`.goreleaser.yaml`). See [CONTRIBUTING.md](CONTRIBUTING.md).
 * `scripts/termshot.py` runs the app in a pty, sends keys, and renders the
   emulated screen to text, a style dump and a PNG: handy to check colours and
   alignment (`pip install pyte pillow`; see `scripts/tour.script`).
@@ -258,6 +298,13 @@ go test ./internal/ui -run Golden -update              # refresh the golden scre
 - `docker service update --replicas=+1` is rejected by the CLI; scaling goes
   through the API with an absolute count.
 - The engine normalises image references on decode (`nginx` → `nginx:latest`).
+- Container events carry the labels of the container, so the events of task
+  containers are recognised by `com.docker.swarm.task.id`, from their very first
+  event (`create`, `start`).
+- Volumes are per node: the volumes view lists those of the node you are
+  connected to.
+- The client negotiates the API version down to what both sides speak (1.51 with
+  Docker 29), so objects are read and written as that version knows them.
 - Bubble Tea v1 asks the terminal for its background colour at start-up; a
   terminal that never answers delays the first frame.
 
