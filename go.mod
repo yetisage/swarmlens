@@ -8,8 +8,8 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.6
 	github.com/containerd/errdefs v1.0.0
-	github.com/moby/moby/api v1.56.1
-	github.com/moby/moby/client v0.6.2
+	github.com/moby/moby/api v1.57.0
+	github.com/moby/moby/client v0.6.3
 	github.com/muesli/termenv v0.16.0
 	github.com/rivo/uniseg v0.4.7
 	gopkg.in/yaml.v3 v3.0.1
